@@ -412,7 +412,9 @@
       ROUND_END_DELAY: 2.25,
       HOST_HEARTBEAT_MS: 1500,
       HOST_STALE_MS: 5500,
-      INTERPOLATION: 0.28
+      INTERPOLATION: 0.28,
+      CLIENT_PREDICTION_MS: 900,
+      CLIENT_PREDICTION_RECONCILE_DISTANCE: 0.035
     };
     // ==============================================================================
 
@@ -466,6 +468,7 @@
     let lastHeartbeat = 0;
     let lastPassAt = 0;
     let drag = null;
+    let localPrediction = null;
     let arenaSize = 800;
 
     const game = emptyGame();
@@ -1022,8 +1025,20 @@
       p.vx = (-dx / Math.max(dist, 1)) * maxSpeed * power;
       p.vy = (-dy / Math.max(dist, 1)) * maxSpeed * power;
       p.lastDashAt = nowMs();
-      if (isHost) syncHostState();
-      else playerRef.update({ vx: p.vx, vy: p.vy, lastDashAt: p.lastDashAt });
+      if (isHost) {
+        syncHostState();
+      } else {
+        localPrediction = {
+          x: p.x,
+          y: p.y,
+          vx: p.vx,
+          vy: p.vy,
+          lastDashAt: p.lastDashAt,
+          until: nowMs() + CONFIG.CLIENT_PREDICTION_MS
+        };
+        renderState.players[uid] = { ...(renderState.players[uid] || p), ...p };
+        playerRef.update({ vx: p.vx, vy: p.vy, lastDashAt: p.lastDashAt });
+      }
     }
 
     function canvasPoint(evt) {
@@ -1064,10 +1079,38 @@
     function render(dt) {
       const source = game;
       if (isHost) copyInto(renderState, source);
-      else interpolateState(renderState, source);
+      else {
+        interpolateState(renderState, source);
+        applyClientPrediction(dt);
+      }
       draw();
       updateRoundText();
       updateCornerTags();
+    }
+
+    function applyClientPrediction(dt) {
+      if (!localPrediction || !renderState.players[uid] || game.phase !== "playing") return;
+      const authoritative = game.players[uid];
+      const predicted = renderState.players[uid];
+      const t = nowMs();
+      localPrediction.x += (localPrediction.vx || 0) * dt;
+      localPrediction.y += (localPrediction.vy || 0) * dt;
+      localPrediction.vx = (localPrediction.vx || 0) * Math.pow(CONFIG.PLAYER_FRICTION, dt * 60);
+      localPrediction.vy = (localPrediction.vy || 0) * Math.pow(CONFIG.PLAYER_FRICTION, dt * 60);
+      limitVelocity(localPrediction, CONFIG.MAX_PLAYER_SPEED_RATIO_PER_SECOND);
+      bounceCircleWalls(localPrediction, CONFIG.PLAYER_RADIUS_RATIO);
+
+      predicted.x = localPrediction.x;
+      predicted.y = localPrediction.y;
+      predicted.vx = localPrediction.vx;
+      predicted.vy = localPrediction.vy;
+      predicted.lastDashAt = localPrediction.lastDashAt;
+
+      const serverCaughtUp = authoritative &&
+        authoritative.lastDashAt === localPrediction.lastDashAt &&
+        hypot((authoritative.x || 0) - localPrediction.x, (authoritative.y || 0) - localPrediction.y) < CONFIG.CLIENT_PREDICTION_RECONCILE_DISTANCE;
+      const predictionExpired = t > localPrediction.until || speed(localPrediction) * arenaSize < CONFIG.NEAR_ZERO_VELOCITY_THRESHOLD;
+      if (serverCaughtUp || predictionExpired) localPrediction = null;
     }
 
     function interpolateState(target, source) {
