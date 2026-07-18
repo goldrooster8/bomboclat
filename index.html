@@ -27,17 +27,32 @@
         // ★★★ ADJUSTABLE GAME BALANCE CONFIG ★★★
         // ============================================================
         const CONFIG = {
-            FUSE_DURATION: 12, MIN_LOCKOUT: 0.5, CARRIER_LOCKOUT: 0.3,
-            MAX_DRAG_RADIUS_RATIO: 0.2, PLAYER_FRICTION: 0.92, BOX_FRICTION: 0.94,
-            NEAR_ZERO_VELOCITY_THRESHOLD: 5, BOX_SIZE_RATIO: 0.055,
-            PLAYER_RADIUS_RATIO: 0.024, ROUNDS_TO_WIN: 3, SYNC_RATE: 30,
-            DASH_SPEED_SCALAR: 5.2, PLAYER_BOX_BRAKE: 0.35, BOX_MOMENTUM_TRANSFER: 0.25,
-            INTERP_LERP_FACTOR: 0.28, EXPLOSION_DURATION: 0.8, COUNTDOWN_SECONDS: 3,
-            GHOST_OPACITY: 0.3, PLAYER_COLORS: ['#FF4D6A','#4DA6FF','#4DFF88','#FFB84D'],
+            FUSE_DURATION: 12,
+            MIN_LOCKOUT: 0.5,
+            CARRIER_LOCKOUT: 0.3,
+            MAX_DRAG_RADIUS_RATIO: 0.2,
+            PLAYER_FRICTION: 0.92,         // players slide a bit
+            BOX_FRICTION: 0.85,            // boxes are heavy, stop quickly (lower = heavier)
+            NEAR_ZERO_VELOCITY_THRESHOLD: 5,
+            BOX_SIZE_RATIO: 0.055,
+            PLAYER_RADIUS_RATIO: 0.024,
+            ROUNDS_TO_WIN: 3,
+            SYNC_RATE: 30,
+            DASH_SPEED_SCALAR: 5.2,
+            PLAYER_BOX_BRAKE: 0.35,
+            BOX_MOMENTUM_TRANSFER: 0.18,   // less speed transferred to boxes
+            INTERP_LERP_FACTOR: 0.28,
+            EXPLOSION_DURATION: 0.8,
+            COUNTDOWN_SECONDS: 3,
+            GHOST_OPACITY: 0.3,
+            PLAYER_COLORS: ['#FF4D6A','#4DA6FF','#4DFF88','#FFB84D'],
             PLAYER_GLOW_COLORS: ['#FF8FA0','#8FC9FF','#8FFFBB','#FFD08F'],
-            BOMB_GLOW_COLOR: '#FF3300', BOMB_PULSE_SPEED: 6,
-            ARENA_BG_COLOR: '#1a1d23', ARENA_GRID_COLOR: '#2a2d35',
-            ARENA_BORDER_COLOR: '#4a5568', ARENA_BORDER_WIDTH_RATIO: 0.006,
+            BOMB_GLOW_COLOR: '#FF3300',
+            BOMB_PULSE_SPEED: 6,
+            ARENA_BG_COLOR: '#1a1d23',
+            ARENA_GRID_COLOR: '#2a2d35',
+            ARENA_BORDER_COLOR: '#4a5568',
+            ARENA_BORDER_WIDTH_RATIO: 0.006,
         };
         // ============================================================
 
@@ -67,7 +82,7 @@
         // ─────────────────────────── Game State ───────────────────────────
         let myPlayerId = null, myPlayerName = 'Player', roomCode = null, isHost = false;
         let gamePhase = 'lobby', arenaSize = 600;
-        let localPlayers = {}, localBoxes = [], localBomb = { carrierId: null, remainingFuse: CONFIG.FUSE_DURATION };
+        let localPlayers = {}, localBoxes = [], localBomb = { carrierId: null, remainingFuse: CONFIG.FUSE_DURATION, fuseEndTime: null };
         let localRoundScores = {}, localMatchScores = {}, localCountdownRemaining = 0;
         let localRoundWinner = null, localMatchWinner = null;
 
@@ -95,27 +110,20 @@
         function getPlayerColor(i){ return CONFIG.PLAYER_COLORS[i%4]; }
         function getPlayerGlowColor(i){ return CONFIG.PLAYER_GLOW_COLORS[i%4]; }
 
-        // ─────────────────────────── Authentication & Room Setup ───────────────────────────
+        // ─────────────────────────── Auth & Room ───────────────────────────
         async function ensureSignedIn() {
             if (auth.currentUser) return auth.currentUser.uid;
             try {
                 const cred = await signInAnonymously(auth);
                 return cred.user.uid;
-            } catch(e) {
-                console.error('Auth error:', e);
-                alert('Could not connect to Firebase. Make sure Anonymous Authentication is enabled in your Firebase console.');
-                throw e;
-            }
+            } catch(e) { alert('Auth failed. Enable Anonymous Auth in Firebase console.'); throw e; }
         }
 
         async function createRoom() {
-            await ensureSignedIn();
-            myPlayerId = auth.currentUser.uid;
+            await ensureSignedIn(); myPlayerId = auth.currentUser.uid;
             const code = generateRoomCode(); roomCode = code;
             roomRef = ref(db, '/rooms/'+code);
-            const snap = await get(roomRef);
-            if (snap.exists()) return createRoom();
-
+            if ((await get(roomRef)).exists()) return createRoom();
             isHost = true; myPlayerName = 'Host_'+Math.floor(Math.random()*1000);
             await set(roomRef, {
                 hostId: myPlayerId, gamePhase: 'lobby', roundScores: {}, matchScores: {},
@@ -129,29 +137,22 @@
             });
             myPlayerRef = ref(db,'/rooms/'+code+'/players/'+myPlayerId);
             onDisconnect(myPlayerRef).update({connected:false});
-
             startClientListener(code);
-            // Lobby overlay stays visible until the game starts
-            roomDisplay.textContent = 'Room: '+code;
-            hudRoomCode.textContent = 'Room: '+code;
+            roomDisplay.textContent = 'Room: '+code; hudRoomCode.textContent = 'Room: '+code;
             document.getElementById('hostBadge').classList.remove('hidden');
             startBtn.classList.remove('hidden');
-            lobbyStatus.textContent = 'Waiting for players...';
-            updatePlayerListUI();
+            lobbyStatus.textContent = 'Waiting for players...'; updatePlayerListUI();
         }
 
         async function joinRoom(code) {
-            await ensureSignedIn();
-            myPlayerId = auth.currentUser.uid;
-            roomCode = code; roomRef = ref(db,'/rooms/'+code);
+            await ensureSignedIn(); myPlayerId = auth.currentUser.uid; roomCode = code;
+            roomRef = ref(db,'/rooms/'+code);
             const snap = await get(roomRef);
             if (!snap.exists()) { joinError.textContent='Room not found.'; joinError.classList.remove('hidden'); return false; }
             const data = snap.val();
             if (data.gamePhase !== 'lobby') { joinError.textContent='Game already in progress.'; joinError.classList.remove('hidden'); return false; }
             const players = data.players || {};
-            if (Object.keys(players).filter(k=>players[k].connected).length >= 4) {
-                joinError.textContent='Room full (4 max).'; joinError.classList.remove('hidden'); return false;
-            }
+            if (Object.keys(players).filter(k=>players[k].connected).length >= 4) { joinError.textContent='Room full (4 max).'; joinError.classList.remove('hidden'); return false; }
             isHost = false; myPlayerName = 'Player_'+Math.floor(Math.random()*1000);
             const colorIndex = Object.keys(players).filter(k=>players[k].connected).length;
             myPlayerRef = ref(db,'/rooms/'+code+'/players/'+myPlayerId);
@@ -162,13 +163,9 @@
             });
             onDisconnect(myPlayerRef).update({connected:false});
             startClientListener(code);
-            // Lobby overlay stays visible until game starts
-            roomDisplay.textContent = 'Room: '+code;
-            hudRoomCode.textContent = 'Room: '+code;
-            document.getElementById('hostBadge').classList.add('hidden');
-            startBtn.classList.add('hidden');
-            lobbyStatus.textContent = 'Waiting for host...';
-            updatePlayerListUI();
+            roomDisplay.textContent = 'Room: '+code; hudRoomCode.textContent = 'Room: '+code;
+            document.getElementById('hostBadge').classList.add('hidden'); startBtn.classList.add('hidden');
+            lobbyStatus.textContent = 'Waiting for host...'; updatePlayerListUI();
             return true;
         }
 
@@ -183,14 +180,13 @@
 
         function handleRoomDeleted() {
             gamePhase='lobby'; roomCode=null; isHost=false;
-            localPlayers={}; localBoxes=[]; localBomb={carrierId:null,remainingFuse:CONFIG.FUSE_DURATION};
+            localPlayers={}; localBoxes=[]; localBomb={carrierId:null,remainingFuse:CONFIG.FUSE_DURATION,fuseEndTime:null};
             explosions=[]; if(hostSyncInterval) clearInterval(hostSyncInterval); hostSyncInterval=null;
             if(clientReadUnsubscribe) clientReadUnsubscribe(); clientReadUnsubscribe=null;
             lobbyOverlay.classList.remove('hidden');
             document.getElementById('lobbyMain').classList.remove('hidden');
             document.getElementById('lobbyRoom').classList.add('hidden');
-            document.getElementById('hostBadge').classList.add('hidden');
-            startBtn.classList.add('hidden');
+            document.getElementById('hostBadge').classList.add('hidden'); startBtn.classList.add('hidden');
             roomDisplay.textContent=''; hudRoomCode.textContent=''; hudScores.textContent='';
             hudStatus.textContent='Disconnected.'; winnerOverlay.classList.add('hidden');
         }
@@ -203,11 +199,15 @@
             localRoundWinner = data.roundWinner||null;
             localMatchWinner = data.matchWinner||null;
 
+            // Bomb update – always read fuseEndTime if present
             if (data.bomb) {
-                localBomb.carrierId = data.bomb.carrierId||null;
-                if (data.bomb.fuseEndTime && localBomb.carrierId)
-                    localBomb.remainingFuse = Math.max(0,(data.bomb.fuseEndTime - Date.now())/1000);
-                else localBomb.remainingFuse = CONFIG.FUSE_DURATION;
+                localBomb.carrierId = data.bomb.carrierId ?? null;
+                localBomb.fuseEndTime = data.bomb.fuseEndTime ?? null;
+                if (localBomb.fuseEndTime) {
+                    localBomb.remainingFuse = Math.max(0, (localBomb.fuseEndTime - Date.now())/1000);
+                } else {
+                    localBomb.remainingFuse = CONFIG.FUSE_DURATION;
+                }
             }
 
             const sPlayers = data.players||{};
@@ -352,7 +352,6 @@
             if (!isHost || gamePhase !== 'lobby') return;
             const connected = Object.entries(localPlayers).filter(([_,p]) => p.connected);
             if (connected.length < 2) return;
-            // Hide lobby and start the game
             lobbyOverlay.classList.add('hidden');
             localMatchScores = {};
             for (const [pid] of connected) localMatchScores[pid] = 0;
@@ -412,6 +411,7 @@
                     const r = Math.floor(Math.random()*alive.length);
                     localBomb.carrierId = alive[r][0];
                     localBomb.fuseEndTime = Date.now() + CONFIG.FUSE_DURATION*1000;
+                    localBomb.remainingFuse = CONFIG.FUSE_DURATION;
                 }
             }
         }
@@ -459,7 +459,6 @@
                 matchScores:{}, roundScores:{}, bomb:{carrierId:null,fuseEndTime:null}, countdownEndTime:null,
             });
             syncHostState();
-            // Show the lobby again
             lobbyOverlay.classList.remove('hidden');
             document.getElementById('lobbyMain').classList.remove('hidden');
             document.getElementById('lobbyRoom').classList.add('hidden');
@@ -467,20 +466,34 @@
             updatePlayerListUI();
         }
 
-        // ─────────────────────────── Boxes & Physics ───────────────────────────
+        // ─────────────────────────── Boxes (Corners) ───────────────────────────
         function initializeBoxPositions() {
-            const gridCols=10, gridRows=6, cellW=arenaSize/gridCols, cellH=arenaSize/gridRows;
+            const cols = 10, rows = 6;
+            const cellW = arenaSize / cols, cellH = arenaSize / rows;
             const pattern = [
-                [0,0,1,1,0,0,1,1,0,0],[0,0,1,0,0,0,0,0,1,0],
-                [0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0],
-                [0,0,1,0,0,0,0,0,1,0],[0,0,1,1,0,0,1,1,0,0]
+                [0,0,1,1,0,0,1,1,0,0],
+                [0,0,1,0,0,0,0,0,1,0],
+                [0,0,0,0,0,0,0,0,0,0],
+                [0,0,0,0,0,0,0,0,0,0],
+                [0,0,1,0,0,0,0,0,1,0],
+                [0,0,1,1,0,0,1,1,0,0]
             ];
             localBoxes = [];
-            for (let r=0;r<gridRows;r++) for (let c=0;c<gridCols;c++) {
-                if (pattern[r][c]===1) localBoxes.push({id:localBoxes.length, x:c*cellW+cellW/2, y:r*cellH+cellH/2, vx:0,vy:0, displayX:c*cellW+cellW/2, displayY:r*cellH+cellH/2});
+            for (let r=0; r<rows; r++) for (let c=0; c<cols; c++) {
+                if (pattern[r][c] === 1) {
+                    localBoxes.push({
+                        id: localBoxes.length,
+                        x: c*cellW + cellW/2,
+                        y: r*cellH + cellH/2,
+                        vx:0, vy:0,
+                        displayX: c*cellW + cellW/2,
+                        displayY: r*cellH + cellH/2
+                    });
+                }
             }
         }
 
+        // ─────────────────────────── Physics ───────────────────────────
         let lastPhysicsTime = 0;
         function hostPhysicsLoop(ts) {
             if (!lastPhysicsTime) lastPhysicsTime = ts;
@@ -494,7 +507,7 @@
 
         function runHostPhysics(dt) {
             const fricP = Math.pow(CONFIG.PLAYER_FRICTION, dt*60);
-            const fricB = Math.pow(CONFIG.BOX_FRICTION, dt*60);
+            const fricB = Math.pow(CONFIG.BOX_FRICTION, dt*60);   // boxes much heavier now
             const th = CONFIG.NEAR_ZERO_VELOCITY_THRESHOLD;
 
             for (const pid of Object.keys(localPlayers)) {
@@ -530,7 +543,7 @@
                 if (box.y<=halfBox || box.y>=arenaSize-halfBox) box.vy=0;
             }
 
-            // Player-Box
+            // Player-Box collision – heavy boxes
             for (const p of Object.values(localPlayers)) {
                 if (!p||!p.alive) continue;
                 for (const box of localBoxes) {
@@ -544,15 +557,15 @@
                         if (dot>0) {
                             const t = CONFIG.BOX_MOMENTUM_TRANSFER;
                             box.vx += nx*dot*t; box.vy += ny*dot*t;
-                            p.vx -= nx*dot*t/t*CONFIG.PLAYER_BOX_BRAKE*t;
-                            p.vy -= ny*dot*t/t*CONFIG.PLAYER_BOX_BRAKE*t;
+                            p.vx -= nx*dot;   // reduce player's speed more directly
+                            p.vy -= ny*dot;
                         }
                         p.vx *= CONFIG.PLAYER_BOX_BRAKE; p.vy *= CONFIG.PLAYER_BOX_BRAKE;
                     }
                 }
             }
 
-            // Box-Box
+            // Box-Box collision
             for (let i=0;i<localBoxes.length;i++) {
                 for (let j=i+1;j<localBoxes.length;j++) {
                     const a=localBoxes[i], b=localBoxes[j];
@@ -572,7 +585,7 @@
                 }
             }
 
-            // Player-Player
+            // Player-Player & bomb passing
             const aliveList = Object.entries(localPlayers).filter(([_,p])=>p.alive&&p.connected);
             for (let i=0;i<aliveList.length;i++) {
                 for (let j=i+1;j<aliveList.length;j++) {
@@ -590,14 +603,16 @@
                 }
             }
 
-            // Bomb fuse
+            // Bomb fuse countdown
             if (localBomb.carrierId && localBomb.fuseEndTime) {
-                localBomb.remainingFuse = Math.max(0, (localBomb.fuseEndTime-Date.now())/1000);
-                if (localBomb.remainingFuse<=0 && localPlayers[localBomb.carrierId]?.alive) hostEliminatePlayer(localBomb.carrierId);
+                localBomb.remainingFuse = Math.max(0, (localBomb.fuseEndTime - Date.now())/1000);
+                if (localBomb.remainingFuse <= 0 && localPlayers[localBomb.carrierId]?.alive) {
+                    hostEliminatePlayer(localBomb.carrierId);
+                }
             }
-            if (localBomb.carrierId && (!localPlayers[localBomb.carrierId]||!localPlayers[localBomb.carrierId].alive)) {
+            if (localBomb.carrierId && (!localPlayers[localBomb.carrierId] || !localPlayers[localBomb.carrierId].alive)) {
                 const remaining = Object.entries(localPlayers).filter(([_,p])=>p.alive&&p.connected);
-                if (remaining.length>=2) {
+                if (remaining.length >= 2) {
                     const r = Math.floor(Math.random()*remaining.length);
                     localBomb.carrierId = remaining[r][0];
                     localBomb.fuseEndTime = Date.now() + CONFIG.FUSE_DURATION*1000;
@@ -646,6 +661,7 @@
             const bw = CONFIG.ARENA_BORDER_WIDTH_RATIO*arenaSize;
             ctx.strokeStyle=CONFIG.ARENA_BORDER_COLOR; ctx.lineWidth=bw;
             ctx.strokeRect(bw/2,bw/2,arenaSize-bw,arenaSize-bw);
+
             const boxSize = CONFIG.BOX_SIZE_RATIO*arenaSize;
             for (const box of localBoxes) {
                 const bx=box.displayX-boxSize/2, by=box.displayY-boxSize/2;
@@ -688,16 +704,21 @@
                 ctx.restore();
             }
 
-            if (gamePhase==='playing' && localBomb.carrierId && localBomb.remainingFuse>0) {
-                const r=localBomb.remainingFuse, cx=arenaSize/2, cy=arenaSize/2;
-                ctx.save(); ctx.globalAlpha=0.45;
-                const ring=1+0.08*Math.sin(ts/300);
-                ctx.strokeStyle=r<4?'#ff3333':r<7?'#ffaa00':'#fff'; ctx.lineWidth=Math.max(3,arenaSize*0.008);
-                ctx.beginPath(); ctx.arc(cx,cy,arenaSize*0.12*ring,0,Math.PI*2); ctx.stroke();
-                ctx.font='bold '+arenaSize*0.14+'px monospace'; ctx.textAlign='center'; ctx.textBaseline='middle';
-                ctx.fillStyle=r<4?'#ff3333':r<7?'#ffaa00':'#fff'; ctx.fillText(Math.ceil(r),cx,cy);
-                ctx.restore();
+            // Bomb timer center display
+            if (gamePhase==='playing' && localBomb.carrierId && localBomb.fuseEndTime) {
+                const r = localBomb.remainingFuse = Math.max(0, (localBomb.fuseEndTime - Date.now())/1000);
+                if (r > 0) {
+                    const cx=arenaSize/2, cy=arenaSize/2;
+                    ctx.save(); ctx.globalAlpha=0.45;
+                    const ring=1+0.08*Math.sin(ts/300);
+                    ctx.strokeStyle=r<4?'#ff3333':r<7?'#ffaa00':'#fff'; ctx.lineWidth=Math.max(3,arenaSize*0.008);
+                    ctx.beginPath(); ctx.arc(cx,cy,arenaSize*0.12*ring,0,Math.PI*2); ctx.stroke();
+                    ctx.font='bold '+arenaSize*0.14+'px monospace'; ctx.textAlign='center'; ctx.textBaseline='middle';
+                    ctx.fillStyle=r<4?'#ff3333':r<7?'#ffaa00':'#fff'; ctx.fillText(Math.ceil(r),cx,cy);
+                    ctx.restore();
+                }
             }
+
             if (gamePhase==='countdown' && localCountdownRemaining>0) {
                 ctx.save(); ctx.globalAlpha=0.7;
                 ctx.font='bold '+arenaSize*0.2+'px monospace'; ctx.textAlign='center'; ctx.textBaseline='middle';
@@ -763,8 +784,7 @@
             const pos=getCanvasPos(e); dragCurrentX=pos.x; dragCurrentY=pos.y; e.preventDefault();
         }
         function handleDragEnd(e) {
-            if(!dragActive) return;
-            dragActive=false;
+            if(!dragActive) return; dragActive=false;
             const pos=e.changedTouches?getCanvasPos(e):{x:dragCurrentX,y:dragCurrentY};
             dragCurrentX=pos.x; dragCurrentY=pos.y;
             if(!myPlayerId||!localPlayers[myPlayerId]?.alive||gamePhase!=='playing') return;
@@ -846,16 +866,12 @@
         startBtn.onclick = ()=>{ if(isHost && gamePhase==='lobby') hostStartGame(); };
         playAgainBtn.onclick = ()=>{ winnerOverlay.classList.add('hidden'); if(isHost) hostResetToLobby(); };
 
-        // ─────────────────────────── Initialization ───────────────────────────
+        // ─────────────────────────── Init ───────────────────────────
         function init() {
             recalculateArenaSize();
             initializeBoxPositions();
             localPlayers={}; localBoxes=[];
-            ensureSignedIn().then(() => {
-                lobbyStatus.textContent = 'Ready – create or join a room.';
-            }).catch(err => {
-                lobbyStatus.textContent = 'Auth failed. Check Anonymous Auth in Firebase console.';
-            });
+            ensureSignedIn().then(() => { lobbyStatus.textContent = 'Ready – create or join a room.'; });
             requestAnimationFrame(hostPhysicsLoop);
         }
 
