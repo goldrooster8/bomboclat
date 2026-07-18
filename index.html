@@ -386,18 +386,25 @@
       MIN_LOCKOUT: 0.5,
       CARRIER_LOCKOUT_BONUS: 0.3,
       MAX_DRAG_RADIUS_RATIO: 0.2,
-      PLAYER_FRICTION: 0.92,
+      PLAYER_FRICTION: 0.955,
       BOX_FRICTION: 0.96,
+      BOX_ANGULAR_FRICTION: 0.91,
       NEAR_ZERO_VELOCITY_THRESHOLD: 5,
       BOX_SIZE_RATIO: 0.06,
       PLAYER_RADIUS_RATIO: 0.025,
       ROUNDS_TO_WIN: 3,
       SYNC_RATE: 30,
-      MAX_DASH_SPEED_MULTIPLIER: 1.25,
+      MAX_DASH_SPEED_MULTIPLIER: 1.4,
       BOX_CLUSTER_INSET_RATIO: 0.18,
       PLAYER_BOX_BRAKE: 0.42,
       BOX_PUSH_MULTIPLIER: 0.48,
       BOX_PLAYER_SEPARATION_SHARE: 0.35,
+      BOX_TORQUE_MULTIPLIER: 10,
+      MAX_PLAYER_SPEED_RATIO_PER_SECOND: 4.2,
+      MAX_BOX_SPEED_RATIO_PER_SECOND: 2.2,
+      MAX_BOX_ANGULAR_SPEED: 9,
+      PHYSICS_SUBSTEPS: 5,
+      COLLISION_PASSES: 3,
       PLAYER_RESTITUTION: 0.72,
       BOX_RESTITUTION: 0.25,
       PASS_GRACE_SECONDS: 0.45,
@@ -422,10 +429,10 @@
     const USE_FIREBASE = !firebaseConfig.apiKey.includes("PASTE_");
     const COLORS = ["#71d4ff", "#ffcc66", "#a98bff", "#80e18d"];
     const SPAWNS = [
-      { x: 0.18, y: 0.18 },
-      { x: 0.82, y: 0.18 },
-      { x: 0.18, y: 0.82 },
-      { x: 0.82, y: 0.82 }
+      { x: 0.08, y: 0.08 },
+      { x: 0.92, y: 0.08 },
+      { x: 0.08, y: 0.92 },
+      { x: 0.92, y: 0.92 }
     ];
 
     const $ = (id) => document.getElementById(id);
@@ -703,7 +710,7 @@
         [inset, far], [nearL, far], [inset, farL],
         [far, far], [farL, far], [far, farL]
       ];
-      return points.map(([x, y], i) => ({ id: i, x, y, vx: 0, vy: 0 }));
+      return points.map(([x, y], i) => ({ id: i, x, y, vx: 0, vy: 0, angle: 0, av: 0 }));
     }
 
     function hostStep(dt) {
@@ -753,6 +760,19 @@
     }
 
     function simulate(dt) {
+      const fastest = Math.max(
+        ...Object.values(game.players || {}).map(p => speed(p)),
+        ...(game.boxes || []).map(b => speed(b)),
+        0
+      );
+      const maxStepDistance = Math.max(CONFIG.PLAYER_RADIUS_RATIO * 0.55, 0.006);
+      const dynamicSteps = Math.ceil((fastest * dt) / maxStepDistance);
+      const steps = clamp(dynamicSteps, 1, CONFIG.PHYSICS_SUBSTEPS);
+      const stepDt = dt / steps;
+      for (let i = 0; i < steps; i++) simulateStep(stepDt);
+    }
+
+    function simulateStep(dt) {
       const players = Object.entries(game.players);
       const boxes = game.boxes || [];
       const pr = CONFIG.PLAYER_RADIUS_RATIO;
@@ -764,35 +784,50 @@
         p.y += (p.vy || 0) * dt;
         p.vx = (p.vx || 0) * Math.pow(CONFIG.PLAYER_FRICTION, dt * 60);
         p.vy = (p.vy || 0) * Math.pow(CONFIG.PLAYER_FRICTION, dt * 60);
+        limitVelocity(p, CONFIG.MAX_PLAYER_SPEED_RATIO_PER_SECOND);
         bounceCircleWalls(p, pr);
       }
 
       for (const b of boxes) {
         b.x += (b.vx || 0) * dt;
         b.y += (b.vy || 0) * dt;
+        b.angle = (b.angle || 0) + (b.av || 0) * dt;
         b.vx = (b.vx || 0) * Math.pow(CONFIG.BOX_FRICTION, dt * 60);
         b.vy = (b.vy || 0) * Math.pow(CONFIG.BOX_FRICTION, dt * 60);
+        b.av = (b.av || 0) * Math.pow(CONFIG.BOX_ANGULAR_FRICTION, dt * 60);
+        limitVelocity(b, CONFIG.MAX_BOX_SPEED_RATIO_PER_SECOND);
+        b.av = clamp(b.av || 0, -CONFIG.MAX_BOX_ANGULAR_SPEED, CONFIG.MAX_BOX_ANGULAR_SPEED);
         bounceBoxWalls(b, bs);
       }
 
-      for (const [, p] of players) {
-        if (!p.active || p.ghost) continue;
-        for (const b of boxes) collideCircleBox(p, b, pr, bs);
-      }
+      for (let pass = 0; pass < CONFIG.COLLISION_PASSES; pass++) {
+        for (const [, p] of players) {
+          if (!p.active || p.ghost) continue;
+          for (const b of boxes) collideCircleBox(p, b, pr, bs);
+        }
 
-      for (let i = 0; i < boxes.length; i++) {
-        for (let j = i + 1; j < boxes.length; j++) collideBoxes(boxes[i], boxes[j], bs);
-      }
+        for (let i = 0; i < boxes.length; i++) {
+          for (let j = i + 1; j < boxes.length; j++) collideBoxes(boxes[i], boxes[j], bs);
+        }
 
-      for (let i = 0; i < players.length; i++) {
-        const [idA, a] = players[i];
-        if (!a.active || a.ghost) continue;
-        for (let j = i + 1; j < players.length; j++) {
-          const [idB, b] = players[j];
-          if (!b.active || b.ghost) continue;
-          collidePlayers(idA, a, idB, b, pr);
+        for (let i = 0; i < players.length; i++) {
+          const [idA, a] = players[i];
+          if (!a.active || a.ghost) continue;
+          for (let j = i + 1; j < players.length; j++) {
+            const [idB, b] = players[j];
+            if (!b.active || b.ghost) continue;
+            collidePlayers(idA, a, idB, b, pr);
+          }
         }
       }
+    }
+
+    function limitVelocity(o, max) {
+      const s = speed(o);
+      if (s <= max || s <= 0.0001) return;
+      const scale = max / s;
+      o.vx = (o.vx || 0) * scale;
+      o.vy = (o.vy || 0) * scale;
     }
 
     function bounceCircleWalls(p, r) {
@@ -840,6 +875,12 @@
       const incoming = Math.max(0, -((p.vx || 0) * nx + (p.vy || 0) * ny));
       b.vx = (b.vx || 0) - nx * incoming * CONFIG.BOX_PUSH_MULTIPLIER;
       b.vy = (b.vy || 0) - ny * incoming * CONFIG.BOX_PUSH_MULTIPLIER;
+      const contactX = cx - (b.x + s / 2);
+      const contactY = cy - (b.y + s / 2);
+      const impulseX = -nx * incoming;
+      const impulseY = -ny * incoming;
+      const torque = contactX * impulseY - contactY * impulseX;
+      b.av = clamp((b.av || 0) + torque * CONFIG.BOX_TORQUE_MULTIPLIER, -CONFIG.MAX_BOX_ANGULAR_SPEED, CONFIG.MAX_BOX_ANGULAR_SPEED);
       p.vx = (p.vx || 0) * CONFIG.PLAYER_BOX_BRAKE;
       p.vy = (p.vy || 0) * CONFIG.PLAYER_BOX_BRAKE;
       bounceBoxWalls(b, s);
@@ -860,6 +901,8 @@
         const av = a.vx || 0;
         a.vx = (b.vx || 0) * CONFIG.BOX_RESTITUTION;
         b.vx = av * CONFIG.BOX_RESTITUTION;
+        a.av = (a.av || 0) + dir * Math.abs(b.vy || 0) * 0.25;
+        b.av = (b.av || 0) + dir * Math.abs(a.vy || 0) * 0.25;
       } else {
         const dir = ay < by ? -1 : 1;
         a.y += dir * oy / 2;
@@ -867,7 +910,11 @@
         const av = a.vy || 0;
         a.vy = (b.vy || 0) * CONFIG.BOX_RESTITUTION;
         b.vy = av * CONFIG.BOX_RESTITUTION;
+        a.av = (a.av || 0) - dir * Math.abs(b.vx || 0) * 0.25;
+        b.av = (b.av || 0) - dir * Math.abs(a.vx || 0) * 0.25;
       }
+      a.av = clamp(a.av || 0, -CONFIG.MAX_BOX_ANGULAR_SPEED, CONFIG.MAX_BOX_ANGULAR_SPEED);
+      b.av = clamp(b.av || 0, -CONFIG.MAX_BOX_ANGULAR_SPEED, CONFIG.MAX_BOX_ANGULAR_SPEED);
       bounceBoxWalls(a, s);
       bounceBoxWalls(b, s);
     }
@@ -949,7 +996,9 @@
           x: +b.x.toFixed(5),
           y: +b.y.toFixed(5),
           vx: +(b.vx || 0).toFixed(5),
-          vy: +(b.vy || 0).toFixed(5)
+          vy: +(b.vy || 0).toFixed(5),
+          angle: +(b.angle || 0).toFixed(5),
+          av: +(b.av || 0).toFixed(5)
         })),
         players: slimPlayers
       });
@@ -1041,7 +1090,12 @@
       for (const id of Object.keys(target.players)) if (!source.players?.[id]) delete target.players[id];
       target.boxes = (source.boxes || []).map((b, i) => {
         const prev = target.boxes[i] || b;
-        return { ...b, x: prev.x + (b.x - prev.x) * CONFIG.INTERPOLATION, y: prev.y + (b.y - prev.y) * CONFIG.INTERPOLATION };
+        return {
+          ...b,
+          x: prev.x + (b.x - prev.x) * CONFIG.INTERPOLATION,
+          y: prev.y + (b.y - prev.y) * CONFIG.INTERPOLATION,
+          angle: (prev.angle || 0) + ((b.angle || 0) - (prev.angle || 0)) * CONFIG.INTERPOLATION
+        };
       });
     }
 
@@ -1053,11 +1107,27 @@
       const pr = CONFIG.PLAYER_RADIUS_RATIO * w;
 
       for (const b of renderState.boxes || []) {
+        const x = b.x * w;
+        const y = b.y * w;
         ctx.fillStyle = "#6d7380";
         ctx.strokeStyle = "#171b22";
         ctx.lineWidth = Math.max(2, w * 0.004);
-        ctx.fillRect(b.x * w, b.y * w, bs, bs);
-        ctx.strokeRect(b.x * w, b.y * w, bs, bs);
+        ctx.save();
+        ctx.translate(x + bs / 2, y + bs / 2);
+        ctx.rotate(b.angle || 0);
+        ctx.fillRect(-bs / 2, -bs / 2, bs, bs);
+        ctx.strokeRect(-bs / 2, -bs / 2, bs, bs);
+        ctx.beginPath();
+        ctx.moveTo(-bs / 2, 0);
+        ctx.lineTo(bs / 2, 0);
+        ctx.moveTo(0, -bs / 2);
+        ctx.lineTo(0, bs / 2);
+        ctx.globalAlpha = 0.35;
+        ctx.strokeStyle = "#f4f7fb";
+        ctx.lineWidth = Math.max(1, w * 0.002);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        ctx.restore();
       }
 
       for (const [id, p] of Object.entries(renderState.players || {})) {
