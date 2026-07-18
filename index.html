@@ -1,1743 +1,514 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    <title>Corner Rush - Multiplayer Hot Potato</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Corner Rush</title>
+    <!-- Firebase CDN -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
+    
     <style>
-        /* ─── Reset & Base ─── */
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        html,
-        body {
-            width: 100%;
-            height: 100%;
-            overflow: hidden;
-            background: #0d0f13;
-            font-family: 'Segoe UI', Inter, system-ui, -apple-system, sans-serif;
-            color: #e2e8f0;
-            -webkit-tap-highlight-color: transparent;
-            user-select: none;
-            -webkit-user-select: none;
-            touch-action: manipulation;
-        }
-        #app {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            width: 100%;
-            height: 100%;
-            min-height: 100dvh;
-        }
-
-        /* ─── HUD ─── */
-        #hud {
-            width: 100%;
-            max-width: 900px;
-            padding: 6px 14px;
-            display: flex;
-            flex-wrap: wrap;
-            align-items: center;
-            gap: 8px;
-            font-size: 13px;
-            background: #1a1d25;
-            border-bottom: 1px solid #2d3340;
-            flex-shrink: 0;
-            z-index: 10;
-            min-height: 40px;
-        }
-        #hud>span {
-            white-space: nowrap;
-        }
-        #hudRoomCode {
-            font-weight: 700;
-            color: #4da6ff;
-            font-size: 14px;
-        }
-        #hudScores {
-            flex: 1;
-            min-width: 100px;
-            text-align: center;
-            font-weight: 600;
-            font-size: 13px;
-        }
-        #hudStatus {
-            color: #aab;
-            font-size: 12px;
-        }
-        #hostBadge {
-            background: #ff5e3a;
-            color: #fff;
-            padding: 2px 10px;
-            border-radius: 12px;
-            font-size: 10px;
-            font-weight: 700;
-            letter-spacing: 0.4px;
-        }
-        .hidden {
-            display: none !important;
-        }
-
-        /* ─── Arena ─── */
-        #arenaWrapper {
-            position: relative;
-            flex-shrink: 0;
-            box-shadow: 0 0 40px rgba(0, 0, 0, 0.5), 0 0 8px rgba(255, 255, 255, 0.04);
-            border-radius: 4px;
-            overflow: hidden;
-            background: #1a1d23;
-        }
-        #gameCanvas {
-            display: block;
-            width: 100%;
-            height: 100%;
-            cursor: crosshair;
-            touch-action: none;
-        }
-
-        /* ─── Overlays ─── */
-        .overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.78);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 100;
-            backdrop-filter: blur(5px);
-            -webkit-backdrop-filter: blur(5px);
-        }
-        .overlay-card {
-            background: #1a1d25;
-            border: 1px solid #2d3340;
-            border-radius: 16px;
-            padding: 28px 24px;
-            text-align: center;
-            max-width: 420px;
-            width: 92%;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
-        }
-        .overlay-card h2 {
-            font-size: 22px;
-            margin-bottom: 4px;
-        }
-        .overlay-card h3 {
-            font-size: 16px;
-            color: #aab;
-            margin-bottom: 12px;
-            font-weight: 400;
-        }
-        .overlay-card p {
-            font-size: 14px;
-            color: #99a;
-            margin-bottom: 14px;
-        }
-        .overlay-card input {
-            width: 100%;
-            padding: 12px;
-            font-size: 22px;
-            text-align: center;
-            letter-spacing: 8px;
-            border: 2px solid #2d3340;
-            border-radius: 10px;
-            background: #0d0f13;
-            color: #fff;
-            margin-bottom: 10px;
-            outline: none;
-        }
-        .overlay-card input:focus {
-            border-color: #4da6ff;
-        }
-
-        /* ─── Buttons ─── */
-        .btn {
-            display: inline-block;
-            padding: 11px 26px;
-            border-radius: 10px;
-            border: none;
-            font-size: 14px;
-            font-weight: 600;
-            cursor: pointer;
-            margin: 4px;
-            transition: 0.15s;
-            letter-spacing: 0.3px;
-        }
-        .btn:active {
-            transform: scale(0.96);
-        }
-        .btn-primary {
-            background: #ff5e3a;
-            color: #fff;
-        }
-        .btn-primary:hover {
-            background: #ff6b4a;
-        }
-        .btn-secondary {
-            background: #4da6ff;
-            color: #fff;
-        }
-        .btn-secondary:hover {
-            background: #6bb8ff;
-        }
-        .btn-ghost {
-            background: transparent;
-            color: #aab;
-            border: 1px solid #2d3340;
-        }
-        .btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-            transform: none;
-        }
-
-        #joinError {
-            color: #ff5555;
-            font-size: 13px;
-            margin-top: 4px;
-            min-height: 20px;
-        }
-        #playerList {
-            text-align: left;
-            font-size: 13px;
-            max-height: 140px;
-            overflow-y: auto;
-            margin: 6px 0;
-        }
-        #lobbyStatus {
-            font-size: 12px;
-            color: #8a8;
-            margin-top: 4px;
-            min-height: 20px;
-        }
-        #roomDisplay {
-            font-weight: 700;
-            font-size: 16px;
-            color: #4da6ff;
-            margin-bottom: 4px;
-        }
-        #winnerText {
-            font-size: 24px;
-            font-weight: 700;
-            color: #ffd700;
-        }
-        #winnerSub {
-            color: #ccc;
-            margin-bottom: 12px;
-        }
-
-        @media (max-width: 600px) {
-            #hud {
-                font-size: 11px;
-                padding: 4px 8px;
-                gap: 4px;
-                min-height: 34px;
-            }
-            #hudRoomCode {
-                font-size: 12px;
-            }
-            #hudScores {
-                font-size: 11px;
-                min-width: 70px;
-            }
-            .overlay-card {
-                padding: 18px 14px;
-            }
-            .btn {
-                padding: 9px 16px;
-                font-size: 13px;
-            }
-        }
+        * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+        body { background: #222; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; overflow: hidden; touch-action: none; }
+        #ui { position: absolute; top: 0; left: 0; width: 100%; display: flex; justify-content: space-between; padding: 10px 20px; pointer-events: none; z-index: 10; }
+        #lobby { background: #333; padding: 20px; border-radius: 8px; text-align: center; z-index: 20; }
+        #lobby input { padding: 10px; font-size: 16px; margin: 10px; text-transform: uppercase; width: 100px; text-align: center;}
+        button { padding: 10px 20px; font-size: 16px; cursor: pointer; background: #e74c3c; color: white; border: none; border-radius: 5px; margin: 5px; }
+        #game-container { display: none; position: relative; width: 100vw; height: 100vh; flex-direction: column; align-items: center; justify-content: center; }
+        canvas { background: #ecf0f1; box-shadow: 0 0 0 10px #34495e; border-radius: 4px; touch-action: none; }
+        #message { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 48px; font-weight: bold; color: #e74c3c; text-shadow: 2px 2px 0 #000; display: none; pointer-events: none; z-index: 15; text-align: center; }
+        .hud-text { font-size: 18px; font-weight: bold; background: rgba(0,0,0,0.5); padding: 5px 10px; border-radius: 4px; }
     </style>
 </head>
 <body>
-    <div id="app">
-        <!-- HUD -->
-        <div id="hud">
-            <span id="hudRoomCode">Room: ----</span>
-            <span id="hostBadge" class="hidden">HOST</span>
-            <span id="hudScores">Scores</span>
-            <span id="hudStatus">Connecting…</span>
-        </div>
 
-        <!-- Arena -->
-        <div id="arenaWrapper">
-            <canvas id="gameCanvas"></canvas>
-        </div>
-
-        <!-- Lobby Overlay -->
-        <div id="lobbyOverlay" class="overlay">
-            <div class="overlay-card">
-                <div id="lobbyMain">
-                    <h2>🎯 Corner Rush</h2>
-                    <h3>Hot Potato · 2‑4 Players</h3>
-                    <p>Drag to slingshot · Pass the bomb · Last one standing wins!</p>
-                    <button id="createBtn" class="btn btn-primary">✨ Create Room</button>
-                    <button id="joinBtn" class="btn btn-secondary">🔗 Join Room</button>
-                </div>
-                <div id="lobbyRoom" class="hidden">
-                    <h3>Join a Room</h3>
-                    <input type="text" id="roomCodeInput" inputmode="numeric" pattern="[0-9]*" maxlength="4" placeholder="0000" />
-                    <div id="joinError" class="hidden"></div>
-                    <button id="joinConfirmBtn" class="btn btn-primary">Join</button>
-                    <button id="cancelJoinBtn" class="btn btn-ghost">Back</button>
-                </div>
-                <div id="roomDisplay"></div>
-                <div id="playerList"></div>
-                <div id="lobbyStatus">Initializing…</div>
-                <button id="startBtn" class="btn btn-primary hidden" style="margin-top:8px;">🚀 Start Game</button>
-            </div>
-        </div>
-
-        <!-- Winner Overlay -->
-        <div id="winnerOverlay" class="overlay hidden">
-            <div class="overlay-card">
-                <div id="winnerText">🏆 Winner!</div>
-                <div id="winnerSub"></div>
-                <button id="playAgainBtn" class="btn btn-primary">Play Again</button>
-            </div>
-        </div>
+    <div id="lobby">
+        <h1>Corner Rush</h1>
+        <p>Enter 4-digit code to join, or create a room.</p>
+        <input type="text" id="room-code" maxlength="4" placeholder="CODE">
+        <br>
+        <button onclick="joinRoom()">Join Room</button>
+        <button onclick="createRoom()">Create Room</button>
+        <p id="lobby-msg" style="color:#ffcc00; margin-top:10px;"></p>
     </div>
 
-    <!-- ─── Firebase & Game Script ─── -->
-    <script type="module">
-        import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js';
-        import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js';
-        import { getDatabase, ref, set, update, get, onValue, onDisconnect, serverTimestamp } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-database.js';
+    <div id="game-container">
+        <div id="ui">
+            <div id="room-display" class="hud-text">Room: ----</div>
+            <div id="scores-display" class="hud-text">Waiting for players...</div>
+        </div>
+        <canvas id="gameCanvas"></canvas>
+        <div id="message"></div>
+    </div>
 
-        // ─── Firebase Config ───
-        const firebaseConfig = {
-            apiKey: "AIzaSyBfOKGz06urUqutCnDUfy6P2hMswoBifq8",
-            authDomain: "bomb-game-782c2.firebaseapp.com",
-            databaseURL: "https://bomb-game-782c2-default-rtdb.asia-southeast1.firebasedatabase.app",
-            projectId: "bomb-game-782c2",
-            storageBucket: "bomb-game-782c2.firebasestorage.app",
-            messagingSenderId: "984947565972",
-            appId: "1:984947565972:web:486661db2f7dab317bdb81"
-        };
+<script>
+    // ==========================================
+    // CONFIGURATION BLOCK
+    // ==========================================
+    const CONFIG = {
+        FUSE_DURATION: 12,              // Seconds the bomb lasts
+        MIN_LOCKOUT: 0.5,               // Base dash cooldown (seconds)
+        CARRIER_LOCKOUT_BONUS: 0.3,     // Carrier cooldown bonus (seconds)
+        MAX_DRAG_RADIUS_RATIO: 0.2,     // Max drag distance (20% of arena)
+        PLAYER_FRICTION: 0.92,          // Velocity multiplier per frame for players
+        BOX_FRICTION: 0.85,             // Velocity multiplier for heavy boxes (lower = stops faster)
+        NEAR_ZERO_VELOCITY_THRESHOLD: 5,// Pixels per sec to allow next dash
+        BOX_SIZE_RATIO: 0.06,           // Box size (6% of arena)
+        PLAYER_RADIUS_RATIO: 0.025,     // Player radius (2.5% of arena)
+        ROUNDS_TO_WIN: 3,               // Score needed to win match
+        SYNC_RATE: 30,                  // Firebase syncs per second
+        MAX_DASH_SPEED: 1800            // Base multiplier for max drag
+    };
 
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getDatabase(app);
+    // ==========================================
+    // FIREBASE INITIALIZATION
+    // ==========================================
+    // REPLACE WITH YOUR FIREBASE CONFIG
+    const firebaseConfig = {
+        apiKey: "YOUR_API_KEY",
+        authDomain: "YOUR_AUTH_DOMAIN",
+        databaseURL: "YOUR_DATABASE_URL",
+        projectId: "YOUR_PROJECT_ID",
+        storageBucket: "YOUR_STORAGE_BUCKET",
+        messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+        appId: "YOUR_APP_ID"
+    };
+    
+    // Initialize standard Firebase logic to run immediately if valid config, else hold.
+    let app, auth, db;
+    try {
+        app = firebase.initializeApp(firebaseConfig);
+        auth = firebase.auth();
+        db = firebase.database();
+        auth.signInAnonymously();
+    } catch(e) {
+        console.warn("Firebase not configured. Add credentials to play online.");
+    }
 
-        // ─── CONFIG ───
-        const CONFIG = {
-            FUSE_DURATION: 12,
-            MIN_LOCKOUT: 0.5,
-            CARRIER_LOCKOUT: 0.3,
-            MAX_DRAG_RADIUS_RATIO: 0.22,
-            PLAYER_FRICTION: 0.92,
-            BOX_FRICTION: 0.88,
-            NEAR_ZERO_VELOCITY_THRESHOLD: 5,
-            BOX_SIZE_RATIO: 0.055,
-            PLAYER_RADIUS_RATIO: 0.024,
-            ROUNDS_TO_WIN: 3,
-            SYNC_RATE: 30,
-            DASH_SPEED_SCALAR: 5.2,
-            PLAYER_BOX_BRAKE: 0.35,
-            BOX_MOMENTUM_TRANSFER: 0.22,
-            INTERP_LERP_FACTOR: 0.30,
-            EXPLOSION_DURATION: 0.8,
-            COUNTDOWN_SECONDS: 3,
-            GHOST_OPACITY: 0.30,
-            PLAYER_COLORS: ['#FF4D6A', '#4DA6FF', '#4DFF88', '#FFB84D'],
-            PLAYER_GLOW_COLORS: ['#FF8FA0', '#8FC9FF', '#8FFFBB', '#FFD08F'],
-            BOMB_GLOW_COLOR: '#FF3300',
-            BOMB_PULSE_SPEED: 6,
-            ARENA_BG_COLOR: '#1a1d23',
-            ARENA_GRID_COLOR: '#2a2d35',
-            ARENA_BORDER_COLOR: '#4a5568',
-            ARENA_BORDER_WIDTH_RATIO: 0.006,
-        };
+    // ==========================================
+    // GAME STATE & GLOBALS
+    // ==========================================
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    
+    let myId = null;
+    let roomCode = null;
+    let isHost = false;
+    let arenaSize = 0;
+    
+    // Local interpolation & state
+    let state = { phase: 'lobby', timer: 0, bomb: null, boxes: [], players: {} };
+    let scores = {};
+    let localInputs = { dragging: false, startX: 0, startY: 0, currentX: 0, currentY: 0, lastDashTime: 0 };
+    let playerColors = ['#3498db', '#2ecc71', '#9b59b6', '#f1c40f'];
 
-        // ─── DOM refs ───
-        const canvas = document.getElementById('gameCanvas');
-        const ctx = canvas.getContext('2d');
-        const arenaWrapper = document.getElementById('arenaWrapper');
-        const hudRoomCode = document.getElementById('hudRoomCode');
-        const hudScores = document.getElementById('hudScores');
-        const hudStatus = document.getElementById('hudStatus');
-        const lobbyOverlay = document.getElementById('lobbyOverlay');
-        const createBtn = document.getElementById('createBtn');
-        const joinBtn = document.getElementById('joinBtn');
-        const roomCodeInput = document.getElementById('roomCodeInput');
-        const joinConfirmBtn = document.getElementById('joinConfirmBtn');
-        const cancelJoinBtn = document.getElementById('cancelJoinBtn');
-        const joinError = document.getElementById('joinError');
-        const roomDisplay = document.getElementById('roomDisplay');
-        const playerList = document.getElementById('playerList');
-        const startBtn = document.getElementById('startBtn');
-        const lobbyStatus = document.getElementById('lobbyStatus');
-        const winnerOverlay = document.getElementById('winnerOverlay');
-        const winnerText = document.getElementById('winnerText');
-        const winnerSub = document.getElementById('winnerSub');
-        const playAgainBtn = document.getElementById('playAgainBtn');
+    // Resize handling (Square arena)
+    function resize() {
+        let size = Math.min(window.innerWidth, window.innerHeight) * 0.9;
+        canvas.width = size;
+        canvas.height = size;
+        arenaSize = size;
+    }
+    window.addEventListener('resize', resize);
+    resize();
 
-        // ─── State ───
-        let myPlayerId = null;
-        let myPlayerName = 'Player';
-        let roomCode = null;
-        let isHost = false;
-        let gamePhase = 'lobby'; // lobby | countdown | playing | roundEnd | matchEnd
-        let arenaSize = 600;
+    // ==========================================
+    // LOBBY & NETWORKING
+    // ==========================================
+    function createCode() { return Math.floor(1000 + Math.random() * 9000).toString(); }
+    
+    auth.onAuthStateChanged(user => { if(user) myId = user.uid; });
 
-        // Local copies (interpolated for display)
-        let localPlayers = {};
-        let localBoxes = [];
-        let localBomb = {
-            carrierId: null,
-            remainingFuse: CONFIG.FUSE_DURATION,
-            fuseEndTime: null
-        };
-        let localRoundScores = {};
-        let localMatchScores = {};
-        let localCountdownRemaining = 0;
-        let localRoundWinner = null;
-        let localMatchWinner = null;
+    function createRoom() {
+        if(!myId) return alert("Connecting...");
+        roomCode = createCode();
+        isHost = true;
+        joinFirebaseRoom(roomCode);
+    }
 
-        // Input
-        let dragActive = false;
-        let dragStartX = 0,
-            dragStartY = 0;
-        let dragCurrentX = 0,
-            dragCurrentY = 0;
-        let lastDashTime = 0;
-        let pendingDashCommand = null;
-        let lastProcessedDashTimestamp = 0;
-
-        // Effects
-        let explosions = [];
-
-        // Firebase refs
-        let roomRef = null;
-        let myPlayerRef = null;
-        let hostSyncInterval = null;
-        let clientReadUnsubscribe = null;
-        let dashListenerUnsubscribe = null;
-
-        // ─── Arena sizing ───
-        function recalculateArenaSize() {
-            const vw = window.innerWidth;
-            const vh = window.innerHeight;
-            const hudEl = document.getElementById('hud');
-            const hudHeight = hudEl ? hudEl.offsetHeight : 50;
-            const availableHeight = vh - hudHeight - 20;
-            const availableWidth = vw - 20;
-            const maxSize = Math.min(availableWidth, availableHeight, 900);
-            arenaSize = Math.max(280, Math.floor(maxSize));
-            arenaWrapper.style.width = arenaSize + 'px';
-            arenaWrapper.style.height = arenaSize + 'px';
-            canvas.width = arenaSize;
-            canvas.height = arenaSize;
-        }
-        window.addEventListener('resize', recalculateArenaSize);
-        window.addEventListener('orientationchange', () => setTimeout(recalculateArenaSize, 300));
-
-        // ─── Helpers ───
-        function generateRoomCode() {
-            return String(Math.floor(1000 + Math.random() * 9000));
-        }
-
-        function getPlayerColor(i) {
-            return CONFIG.PLAYER_COLORS[i % 4];
-        }
-
-        function getPlayerGlowColor(i) {
-            return CONFIG.PLAYER_GLOW_COLORS[i % 4];
-        }
-
-        function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
-
-        // ─── Auth ───
-        async function ensureSignedIn() {
-            if (auth.currentUser) return auth.currentUser.uid;
-            try {
-                const cred = await signInAnonymously(auth);
-                return cred.user.uid;
-            } catch (e) {
-                alert('Auth failed. Enable Anonymous Auth in Firebase console.');
-                throw e;
-            }
-        }
-
-        // ─── Boxes ───
-        function initializeBoxPositions() {
-            // 8×8 grid → boxes in four 2×2 corner clusters
-            const cols = 8,
-                rows = 8;
-            const cellW = arenaSize / cols;
-            const cellH = arenaSize / rows;
-            const pattern = [
-                [1, 1, 0, 0, 0, 0, 1, 1],
-                [1, 1, 0, 0, 0, 0, 1, 1],
-                [0, 0, 0, 0, 0, 0, 0, 0],
-                [0, 0, 0, 0, 0, 0, 0, 0],
-                [0, 0, 0, 0, 0, 0, 0, 0],
-                [0, 0, 0, 0, 0, 0, 0, 0],
-                [1, 1, 0, 0, 0, 0, 1, 1],
-                [1, 1, 0, 0, 0, 0, 1, 1]
-            ];
-            const boxes = [];
-            for (let r = 0; r < rows; r++) {
-                for (let c = 0; c < cols; c++) {
-                    if (pattern[r][c] === 1) {
-                        boxes.push({
-                            id: boxes.length,
-                            x: c * cellW + cellW / 2,
-                            y: r * cellH + cellH / 2,
-                            vx: 0,
-                            vy: 0,
-                            displayX: c * cellW + cellW / 2,
-                            displayY: r * cellH + cellH / 2,
-                        });
-                    }
-                }
-            }
-            return boxes;
-        }
-
-        // ─── Create / Join ───
-        async function createRoom() {
-            await ensureSignedIn();
-            myPlayerId = auth.currentUser.uid;
-            const code = generateRoomCode();
+    function joinRoom() {
+        if(!myId) return alert("Connecting...");
+        let code = document.getElementById('room-code').value.trim().toUpperCase();
+        if(code.length === 4) {
             roomCode = code;
-            roomRef = ref(db, '/rooms/' + code);
-            if ((await get(roomRef)).exists()) return createRoom();
-
-            isHost = true;
-            myPlayerName = 'Host_' + Math.floor(Math.random() * 1000);
-
-            await set(roomRef, {
-                hostId: myPlayerId,
-                gamePhase: 'lobby',
-                roundScores: {},
-                matchScores: {},
-                roundWinner: null,
-                matchWinner: null,
-                countdownEndTime: null,
-                bomb: { carrierId: null, fuseEndTime: null },
-                createdAt: serverTimestamp(),
-            });
-
-            const boxes = initializeBoxPositions();
-            const boxData = {};
-            for (const b of boxes) boxData['box_' + b.id] = { x: b.x, y: b.y, vx: 0, vy: 0 };
-
-            await set(ref(db, '/rooms/' + code + '/players/' + myPlayerId), {
-                name: myPlayerName,
-                colorIndex: 0,
-                x: arenaSize * 0.5,
-                y: arenaSize * 0.5,
-                vx: 0,
-                vy: 0,
-                alive: true,
-                connected: true,
-                dashCommand: null,
-                score: 0,
-                joinedAt: serverTimestamp(),
-            });
-            await set(ref(db, '/rooms/' + code + '/boxes'), boxData);
-
-            myPlayerRef = ref(db, '/rooms/' + code + '/players/' + myPlayerId);
-            onDisconnect(myPlayerRef).update({ connected: false });
-
-            startClientListener(code);
-            roomDisplay.textContent = 'Room: ' + code;
-            hudRoomCode.textContent = 'Room: ' + code;
-            document.getElementById('hostBadge').classList.remove('hidden');
-            startBtn.classList.remove('hidden');
-            lobbyStatus.textContent = 'Waiting for players…';
-            updatePlayerListUI();
-            // Hide lobby main, show room info
-            document.getElementById('lobbyMain').classList.add('hidden');
-            document.getElementById('lobbyRoom').classList.add('hidden');
-            roomDisplay.classList.remove('hidden');
-            document.querySelector('#lobbyOverlay .overlay-card').style.paddingBottom = '12px';
-        }
-
-        async function joinRoom(code) {
-            await ensureSignedIn();
-            myPlayerId = auth.currentUser.uid;
-            roomCode = code;
-            roomRef = ref(db, '/rooms/' + code);
-            const snap = await get(roomRef);
-            if (!snap.exists()) {
-                joinError.textContent = 'Room not found.';
-                joinError.classList.remove('hidden');
-                return false;
-            }
-            const data = snap.val();
-            if (data.gamePhase !== 'lobby') {
-                joinError.textContent = 'Game already in progress.';
-                joinError.classList.remove('hidden');
-                return false;
-            }
-            const players = data.players || {};
-            const connectedCount = Object.keys(players).filter(k => players[k] && players[k].connected).length;
-            if (connectedCount >= 4) {
-                joinError.textContent = 'Room full (4 max).';
-                joinError.classList.remove('hidden');
-                return false;
-            }
-
             isHost = false;
-            myPlayerName = 'Player_' + Math.floor(Math.random() * 1000);
-            const colorIndex = connectedCount;
+            joinFirebaseRoom(roomCode);
+        }
+    }
 
-            myPlayerRef = ref(db, '/rooms/' + code + '/players/' + myPlayerId);
-            await set(myPlayerRef, {
-                name: myPlayerName,
-                colorIndex: colorIndex,
-                x: arenaSize * 0.5 + (Math.random() - 0.5) * arenaSize * 0.2,
-                y: arenaSize * 0.5 + (Math.random() - 0.5) * arenaSize * 0.2,
-                vx: 0,
-                vy: 0,
-                alive: true,
-                connected: true,
-                dashCommand: null,
-                score: 0,
-                joinedAt: serverTimestamp(),
+    function joinFirebaseRoom(code) {
+        const roomRef = db.ref('rooms/' + code);
+        roomRef.child('players/' + myId).set({ x: arenaSize/2, y: arenaSize/2, color: playerColors[Math.floor(Math.random()*4)], ready: true });
+        roomRef.child('players/' + myId).onDisconnect().remove();
+
+        document.getElementById('lobby').style.display = 'none';
+        document.getElementById('game-container').style.display = 'flex';
+        document.getElementById('room-display').innerText = `Room: ${code}`;
+
+        if(isHost) {
+            setupInitialState();
+            setInterval(hostPhysicsLoop, 1000 / CONFIG.SYNC_RATE);
+        }
+
+        // Listen for sync
+        roomRef.child('state').on('value', snap => {
+            if(snap.exists()) state = snap.val();
+            updateUI();
+        });
+        
+        roomRef.child('scores').on('value', snap => {
+            if(snap.exists()) scores = snap.val();
+            updateUI();
+        });
+
+        // Listen for dash intents from clients (Host only)
+        if(isHost) {
+            roomRef.child('intents').on('child_added', snap => {
+                let intent = snap.val();
+                let p = state.players[intent.id];
+                if(p && p.alive) {
+                    p.vx = intent.vx;
+                    p.vy = intent.vy;
+                }
+                snap.ref.remove();
             });
-            onDisconnect(myPlayerRef).update({ connected: false });
-
-            startClientListener(code);
-            roomDisplay.textContent = 'Room: ' + code;
-            hudRoomCode.textContent = 'Room: ' + code;
-            document.getElementById('hostBadge').classList.add('hidden');
-            startBtn.classList.add('hidden');
-            lobbyStatus.textContent = 'Waiting for host…';
-            updatePlayerListUI();
-            document.getElementById('lobbyMain').classList.add('hidden');
-            document.getElementById('lobbyRoom').classList.add('hidden');
-            roomDisplay.classList.remove('hidden');
-            document.querySelector('#lobbyOverlay .overlay-card').style.paddingBottom = '12px';
-            return true;
         }
+        
+        requestAnimationFrame(render);
+    }
 
-        // ─── Client Listener ───
-        function startClientListener(code) {
-            if (clientReadUnsubscribe) clientReadUnsubscribe();
-            clientReadUnsubscribe = onValue(ref(db, '/rooms/' + code), (snap) => {
-                const data = snap.val();
-                if (!data) { handleRoomDeleted(); return; }
-                processServerState(data);
-            });
-        }
+    function setupInitialState() {
+        state = { phase: 'waiting', timer: 0, bomb: null, boxes: [], players: {} };
+        db.ref('rooms/'+roomCode+'/scores').set({});
+        resetRound(true);
+    }
 
-        function handleRoomDeleted() {
-            gamePhase = 'lobby';
-            roomCode = null;
-            isHost = false;
-            localPlayers = {};
-            localBoxes = [];
-            localBomb = { carrierId: null, remainingFuse: CONFIG.FUSE_DURATION, fuseEndTime: null };
-            explosions = [];
-            if (hostSyncInterval) clearInterval(hostSyncInterval);
-            hostSyncInterval = null;
-            if (clientReadUnsubscribe) clientReadUnsubscribe();
-            clientReadUnsubscribe = null;
-            if (dashListenerUnsubscribe) dashListenerUnsubscribe();
-            dashListenerUnsubscribe = null;
-
-            lobbyOverlay.classList.remove('hidden');
-            document.getElementById('lobbyMain').classList.remove('hidden');
-            document.getElementById('lobbyRoom').classList.add('hidden');
-            roomDisplay.classList.add('hidden');
-            document.getElementById('hostBadge').classList.add('hidden');
-            startBtn.classList.add('hidden');
-            roomDisplay.textContent = '';
-            hudRoomCode.textContent = '';
-            hudScores.textContent = '';
-            hudStatus.textContent = 'Disconnected.';
-            winnerOverlay.classList.add('hidden');
-            lobbyStatus.textContent = 'Disconnected – create or join a room.';
-            updatePlayerListUI();
-        }
-
-        // ─── Process Server State ───
-        function processServerState(data) {
-            if (!data) return;
-            const prevPhase = gamePhase;
-            gamePhase = data.gamePhase || 'lobby';
-            localRoundScores = data.roundScores || {};
-            localMatchScores = data.matchScores || {};
-            localRoundWinner = data.roundWinner || null;
-            localMatchWinner = data.matchWinner || null;
-
-            // Bomb
-            if (data.bomb) {
-                localBomb.carrierId = data.bomb.carrierId ?? null;
-                localBomb.fuseEndTime = data.bomb.fuseEndTime ?? null;
-                if (localBomb.fuseEndTime) {
-                    localBomb.remainingFuse = Math.max(0, (localBomb.fuseEndTime - Date.now()) / 1000);
-                } else {
-                    localBomb.remainingFuse = CONFIG.FUSE_DURATION;
-                }
-            }
-
-            // Players
-            const sPlayers = data.players || {};
-            const now = Date.now();
-            for (const pid of new Set([...Object.keys(localPlayers), ...Object.keys(sPlayers)])) {
-                const sp = sPlayers[pid];
-                if (!sp || sp.connected === false) {
-                    if (localPlayers[pid]) {
-                        localPlayers[pid].alive = false;
-                        localPlayers[pid].connected = false;
-                        if (!localPlayers[pid]._disconnectTime) localPlayers[pid]._disconnectTime = now;
-                    }
-                    continue;
-                }
-                if (!localPlayers[pid]) {
-                    const ci = sp.colorIndex || 0;
-                    localPlayers[pid] = {
-                        x: sp.x ?? arenaSize * 0.5,
-                        y: sp.y ?? arenaSize * 0.5,
-                        vx: sp.vx ?? 0,
-                        vy: sp.vy ?? 0,
-                        displayX: sp.x ?? arenaSize * 0.5,
-                        displayY: sp.y ?? arenaSize * 0.5,
-                        alive: sp.alive !== false,
-                        connected: true,
-                        color: getPlayerColor(ci),
-                        glowColor: getPlayerGlowColor(ci),
-                        name: sp.name || 'Player',
-                        score: sp.score || 0,
-                        _disconnectTime: 0,
-                        _lastDashTime: 0,
-                        _lastDashProcessed: 0,
-                    };
-                } else {
-                    const lp = localPlayers[pid];
-                    lp.alive = sp.alive !== false;
-                    lp.connected = true;
-                    lp.name = sp.name || lp.name;
-                    lp.score = sp.score || lp.score;
-                    lp.x = sp.x !== undefined ? sp.x : lp.x;
-                    lp.y = sp.y !== undefined ? sp.y : lp.y;
-                    lp.vx = sp.vx !== undefined ? sp.vx : lp.vx;
-                    lp.vy = sp.vy !== undefined ? sp.vy : lp.vy;
-                    lp._disconnectTime = 0;
-                }
-            }
-            // Clean disconnected after 5s
-            for (const pid of Object.keys(localPlayers)) {
-                if (!sPlayers[pid] && !localPlayers[pid].connected) {
-                    if (!localPlayers[pid]._disconnectTime) localPlayers[pid]._disconnectTime = now;
-                    if (now - localPlayers[pid]._disconnectTime > 5000) delete localPlayers[pid];
-                }
-            }
-
-            // Boxes
-            const sBoxes = data.boxes;
-            if (sBoxes) {
-                const keys = Object.keys(sBoxes).sort();
-                // Keep localBoxes in sync with server order
-                const newBoxes = [];
-                for (let i = 0; i < keys.length; i++) {
-                    const key = keys[i];
-                    const sb = sBoxes[key];
-                    if (!sb) continue;
-                    let box = localBoxes[i];
-                    if (!box) {
-                        box = { id: i, x: 0, y: 0, vx: 0, vy: 0, displayX: 0, displayY: 0 };
-                    }
-                    box.x = sb.x ?? box.x;
-                    box.y = sb.y ?? box.y;
-                    box.vx = sb.vx ?? box.vx;
-                    box.vy = sb.vy ?? box.vy;
-                    if (box.displayX === 0 && box.displayY === 0) {
-                        box.displayX = box.x;
-                        box.displayY = box.y;
-                    }
-                    newBoxes.push(box);
-                }
-                localBoxes = newBoxes;
-            }
-
-            // Countdown
-            localCountdownRemaining = data.countdownEndTime ? Math.max(0, (data.countdownEndTime - Date.now()) / 1000) : 0;
-
-            // Host status
-            if (data.hostId && myPlayerId) {
-                const wasHost = isHost;
-                isHost = (data.hostId === myPlayerId);
-                if (isHost && !wasHost) startHostSyncLoop();
-                document.getElementById('hostBadge').classList.toggle('hidden', !isHost);
-                startBtn.classList.toggle('hidden', !isHost || gamePhase !== 'lobby');
-            }
-
-            // ─── Hide lobby overlay when game starts ───
-            if (gamePhase !== 'lobby' && gamePhase !== 'matchEnd') {
-                lobbyOverlay.classList.add('hidden');
-                roomDisplay.classList.add('hidden');
-                document.getElementById('lobbyMain').classList.add('hidden');
-                document.getElementById('lobbyRoom').classList.add('hidden');
-            } else if (gamePhase === 'lobby') {
-                // Show lobby overlay for everyone in lobby
-                lobbyOverlay.classList.remove('hidden');
-                roomDisplay.classList.remove('hidden');
-                document.getElementById('lobbyMain').classList.add('hidden');
-                document.getElementById('lobbyRoom').classList.add('hidden');
-            }
-
-            // Winner overlay
-            if (gamePhase === 'matchEnd' && localMatchWinner) {
-                const w = localPlayers[localMatchWinner];
-                winnerText.textContent = (w?.name || 'Someone') + ' Wins the Match!';
-                winnerSub.textContent = '🏆 First to ' + CONFIG.ROUNDS_TO_WIN + ' rounds!';
-                winnerOverlay.classList.remove('hidden');
-            } else {
-                winnerOverlay.classList.add('hidden');
-            }
-
-            updateHUD();
-            updatePlayerListUI();
-        }
-
-        // ─── HUD ───
-        function updateHUD() {
-            hudRoomCode.textContent = roomCode ? 'Room: ' + roomCode : '';
-            const parts = [];
-            for (const pid of Object.keys(localMatchScores)) {
-                const p = localPlayers[pid];
-                parts.push((p?.name || pid.slice(0, 6)) + ': ' + (localMatchScores[pid] || 0));
-            }
-            hudScores.textContent = parts.length ? parts.join(' | ') : 'Scores';
-
-            if (gamePhase === 'lobby') {
-                hudStatus.textContent = isHost ? 'Waiting for players…' : 'Waiting for host…';
-            } else if (gamePhase === 'countdown') {
-                hudStatus.textContent = 'Starting in ' + Math.ceil(localCountdownRemaining) + '…';
-            } else if (gamePhase === 'playing') {
-                const alive = Object.values(localPlayers).filter(p => p.alive && p.connected).length;
-                hudStatus.textContent = 'Alive: ' + alive;
-            } else if (gamePhase === 'roundEnd') {
-                hudStatus.textContent = localRoundWinner ? (localPlayers[localRoundWinner]?.name || 'Someone') + ' wins the round!' :
-                    'Round Over!';
-            } else if (gamePhase === 'matchEnd') {
-                hudStatus.textContent = localMatchWinner ? (localPlayers[localMatchWinner]?.name || 'Someone') + ' wins the match! 🏆' :
-                    'Match Over!';
-            }
-        }
-
-        function updatePlayerListUI() {
-            const players = Object.values(localPlayers).filter(p => p.connected);
-            playerList.innerHTML = players.map(p => {
-                const pid = Object.keys(localPlayers).find(k => localPlayers[k] === p);
-                const isMe = pid === myPlayerId;
-                const score = localMatchScores[pid] || 0;
-                return `<div style="display:flex;align-items:center;gap:8px;padding:3px 0;">
-              <span style="display:inline-block;width:14px;height:14px;border-radius:50%;background:${p.color};flex-shrink:0;"></span>
-              <span style="flex:1;">${p.name}${isMe ? ' (You)' : ''}</span>
-              <span>${'⭐'.repeat(score)}</span>
-              ${!p.alive ? '<span style="color:#ff6666;">💀</span>' : ''}
-            </div>`;
-            }).join('');
-            const count = players.length;
-            if (gamePhase === 'lobby') {
-                lobbyStatus.textContent = count >= 2 ? (isHost ? 'Ready to start! (' + count + ' players)' :
-                    'Waiting for host… (' + count + ' players)') : 'Waiting… (' + count + '/2 min)';
-                if (isHost) startBtn.classList.toggle('hidden', count < 2);
-            }
-        }
-
-        // ─── Host Sync Loop ───
-        function startHostSyncLoop() {
-            if (hostSyncInterval) clearInterval(hostSyncInterval);
-            hostSyncInterval = setInterval(() => {
-                if (!isHost || !roomRef || (gamePhase !== 'playing' && gamePhase !== 'countdown' && gamePhase !==
-                        'roundEnd')) return;
-                syncHostState();
-            }, 1000 / CONFIG.SYNC_RATE);
-        }
-
-        function syncHostState() {
-            if (!roomRef || !isHost) return;
-            const pu = {};
-            for (const pid of Object.keys(localPlayers)) {
-                const p = localPlayers[pid];
-                if (!p.connected && !p.alive) continue;
-                pu[pid] = {
-                    x: Math.round(p.x * 100) / 100,
-                    y: Math.round(p.y * 100) / 100,
-                    vx: Math.round(p.vx * 100) / 100,
-                    vy: Math.round(p.vy * 100) / 100,
-                    alive: p.alive,
-                    connected: p.connected,
-                    name: p.name,
-                    score: p.score,
+    function resetRound(fullReset = false) {
+        let boxSize = arenaSize * CONFIG.BOX_SIZE_RATIO;
+        let margin = boxSize * 1.5;
+        let bPositions = [
+            // Top Left
+            {x: margin, y: margin}, {x: margin + boxSize, y: margin}, {x: margin, y: margin + boxSize},
+            // Top Right
+            {x: arenaSize-margin, y: margin}, {x: arenaSize-margin-boxSize, y: margin}, {x: arenaSize-margin, y: margin+boxSize},
+            // Bottom Left
+            {x: margin, y: arenaSize-margin}, {x: margin+boxSize, y: arenaSize-margin}, {x: margin, y: arenaSize-margin-boxSize},
+            // Bottom Right
+            {x: arenaSize-margin, y: arenaSize-margin}, {x: arenaSize-margin-boxSize, y: arenaSize-margin}, {x: arenaSize-margin, y: arenaSize-margin-boxSize}
+        ];
+        
+        state.boxes = bPositions.map(p => ({ x: p.x, y: p.y, vx: 0, vy: 0 }));
+        
+        db.ref('rooms/'+roomCode+'/players').once('value', snap => {
+            let pData = snap.val() || {};
+            let ids = Object.keys(pData);
+            if(ids.length < 2 && !fullReset) { state.phase = 'waiting'; return; }
+            
+            ids.forEach((id, i) => {
+                state.players[id] = { 
+                    x: arenaSize/2 + Math.cos(i)*100, y: arenaSize/2 + Math.sin(i)*100, 
+                    vx: 0, vy: 0, alive: true, color: pData[id].color 
                 };
-            }
-            const bu = {};
-            for (let i = 0; i < localBoxes.length; i++) {
-                const b = localBoxes[i];
-                bu['box_' + i] = {
-                    x: Math.round(b.x * 100) / 100,
-                    y: Math.round(b.y * 100) / 100,
-                    vx: Math.round(b.vx * 100) / 100,
-                    vy: Math.round(b.vy * 100) / 100,
-                };
-            }
-            update(roomRef, {
-                players: pu,
-                boxes: bu,
-                bomb: { carrierId: localBomb.carrierId, fuseEndTime: localBomb.fuseEndTime || null },
-                gamePhase: gamePhase,
-                roundScores: localRoundScores,
-                matchScores: localMatchScores,
-                roundWinner: localRoundWinner,
-                matchWinner: localMatchWinner,
-                countdownEndTime: localCountdownRemaining > 0 ? Date.now() + localCountdownRemaining * 1000 : null,
-            });
-        }
-
-        // ─── Host Game Flow ───
-        function hostStartGame() {
-            if (!isHost || gamePhase !== 'lobby') return;
-            const connected = Object.entries(localPlayers).filter(([_, p]) => p.connected);
-            if (connected.length < 2) return;
-
-            // Hide lobby for everyone
-            lobbyOverlay.classList.add('hidden');
-            roomDisplay.classList.add('hidden');
-            document.getElementById('lobbyMain').classList.add('hidden');
-            document.getElementById('lobbyRoom').classList.add('hidden');
-
-            localMatchScores = {};
-            for (const [pid] of connected) localMatchScores[pid] = 0;
-            localRoundScores = {};
-            hostStartRound();
-        }
-
-        function hostStartRound() {
-            if (!isHost) return;
-            // Reset players
-            for (const pid of Object.keys(localPlayers)) {
-                if (localPlayers[pid].connected) {
-                    localPlayers[pid].alive = true;
-                    localPlayers[pid].x = arenaSize * 0.5 + (Math.random() - 0.5) * arenaSize * 0.3;
-                    localPlayers[pid].y = arenaSize * 0.5 + (Math.random() - 0.5) * arenaSize * 0.3;
-                    localPlayers[pid].vx = 0;
-                    localPlayers[pid].vy = 0;
-                    localPlayers[pid].displayX = localPlayers[pid].x;
-                    localPlayers[pid].displayY = localPlayers[pid].y;
-                }
-            }
-            // Reset boxes
-            localBoxes = initializeBoxPositions();
-            // Reset bomb
-            localBomb.carrierId = null;
-            localBomb.fuseEndTime = null;
-            localBomb.remainingFuse = CONFIG.FUSE_DURATION;
-            localRoundWinner = null;
-            localCountdownRemaining = CONFIG.COUNTDOWN_SECONDS;
-            gamePhase = 'countdown';
-            explosions = [];
-
-            // Write boxes to DB
-            const boxData = {};
-            for (const b of localBoxes) boxData['box_' + b.id] = { x: b.x, y: b.y, vx: 0, vy: 0 };
-            update(roomRef, {
-                gamePhase: 'countdown',
-                countdownEndTime: Date.now() + CONFIG.COUNTDOWN_SECONDS * 1000,
-                roundWinner: null,
-                matchWinner: null,
-                bomb: { carrierId: null, fuseEndTime: null },
-                roundScores: {},
-                boxes: boxData,
-            });
-            syncHostState();
-
-            setTimeout(() => {
-                if (gamePhase === 'countdown' && isHost) hostBeginPlaying();
-            }, CONFIG.COUNTDOWN_SECONDS * 1000);
-        }
-
-        function hostBeginPlaying() {
-            if (!isHost) return;
-            gamePhase = 'playing';
-            localCountdownRemaining = 0;
-            const alive = Object.entries(localPlayers).filter(([_, p]) => p.alive && p.connected);
-            if (alive.length >= 2) {
-                const r = Math.floor(Math.random() * alive.length);
-                localBomb.carrierId = alive[r][0];
-                localBomb.fuseEndTime = Date.now() + CONFIG.FUSE_DURATION * 1000;
-                localBomb.remainingFuse = CONFIG.FUSE_DURATION;
-            } else {
-                localBomb.carrierId = null;
-                localBomb.fuseEndTime = null;
-            }
-            update(roomRef, {
-                gamePhase: 'playing',
-                countdownEndTime: null,
-                bomb: { carrierId: localBomb.carrierId, fuseEndTime: localBomb.fuseEndTime },
-            });
-            startHostSyncLoop();
-        }
-
-        function hostEliminatePlayer(pid) {
-            if (!isHost || !localPlayers[pid]) return;
-            localPlayers[pid].alive = false;
-            localPlayers[pid].vx = 0;
-            localPlayers[pid].vy = 0;
-            explosions.push({
-                x: localPlayers[pid].x,
-                y: localPlayers[pid].y,
-                startTime: Date.now(),
-                duration: CONFIG.EXPLOSION_DURATION * 1000,
-                maxRadius: arenaSize * 0.15,
+                if(fullReset) db.ref(`rooms/${roomCode}/scores/${id}`).set(0);
             });
 
-            const alive = Object.entries(localPlayers).filter(([_, p]) => p.alive && p.connected);
-            if (alive.length <= 1) {
-                hostEndRound(alive.length === 1 ? alive[0][0] : null);
-            } else {
-                // If bomb carrier was eliminated or is invalid, pick a new carrier
-                if (localBomb.carrierId === pid || !localBomb.carrierId || !localPlayers[localBomb.carrierId]?.alive) {
-                    const r = Math.floor(Math.random() * alive.length);
-                    localBomb.carrierId = alive[r][0];
-                    localBomb.fuseEndTime = Date.now() + CONFIG.FUSE_DURATION * 1000;
-                    localBomb.remainingFuse = CONFIG.FUSE_DURATION;
+            state.bomb = ids[Math.floor(Math.random() * ids.length)];
+            state.phase = 'countdown';
+            state.timer = 3;
+            db.ref('rooms/'+roomCode+'/state').set(state);
+
+            let count = 3;
+            let iv = setInterval(() => {
+                count--;
+                state.timer = count;
+                if(count <= 0) {
+                    clearInterval(iv);
+                    state.phase = 'playing';
+                    state.timer = CONFIG.FUSE_DURATION;
+                    db.ref('rooms/'+roomCode+'/state').set(state);
                 }
+            }, 1000);
+        });
+    }
+
+    // ==========================================
+    // INPUT HANDLING (Slingshot)
+    // ==========================================
+    function handleStart(x, y) {
+        if(state.phase !== 'playing' || !state.players[myId]?.alive) return;
+        localInputs.dragging = true;
+        localInputs.startX = x;
+        localInputs.startY = y;
+        localInputs.currentX = x;
+        localInputs.currentY = y;
+    }
+    
+    function handleMove(x, y) {
+        if(localInputs.dragging) {
+            localInputs.currentX = x;
+            localInputs.currentY = y;
+        }
+    }
+
+    function handleEnd() {
+        if(!localInputs.dragging) return;
+        localInputs.dragging = false;
+        
+        let p = state.players[myId];
+        if(!p) return;
+        
+        let speed = Math.hypot(p.vx, p.vy);
+        let lockout = CONFIG.MIN_LOCKOUT - (state.bomb === myId ? CONFIG.CARRIER_LOCKOUT_BONUS : 0);
+        let timeSinceDash = (Date.now() - localInputs.lastDashTime) / 1000;
+        
+        if(timeSinceDash >= lockout && speed < CONFIG.NEAR_ZERO_VELOCITY_THRESHOLD) {
+            let dx = localInputs.startX - localInputs.currentX;
+            let dy = localInputs.startY - localInputs.currentY;
+            let dist = Math.hypot(dx, dy);
+            
+            if(dist > 0) {
+                let maxDrag = arenaSize * CONFIG.MAX_DRAG_RADIUS_RATIO;
+                let power = Math.min(dist, maxDrag) / maxDrag; 
+                
+                let dashVx = (dx / dist) * power * CONFIG.MAX_DASH_SPEED;
+                let dashVy = (dy / dist) * power * CONFIG.MAX_DASH_SPEED;
+                
+                localInputs.lastDashTime = Date.now();
+                
+                // Send intent to Host via DB
+                db.ref(`rooms/${roomCode}/intents`).push({ id: myId, vx: dashVx, vy: dashVy });
             }
         }
+    }
 
-        function hostEndRound(winnerId) {
-            if (!isHost) return;
-            gamePhase = 'roundEnd';
-            localRoundWinner = winnerId;
-            if (winnerId) {
-                localMatchScores[winnerId] = (localMatchScores[winnerId] || 0) + 1;
-                if (localMatchScores[winnerId] >= CONFIG.ROUNDS_TO_WIN) {
-                    localMatchWinner = winnerId;
-                    gamePhase = 'matchEnd';
+    canvas.addEventListener('mousedown', e => handleStart(e.offsetX, e.offsetY));
+    canvas.addEventListener('mousemove', e => handleMove(e.offsetX, e.offsetY));
+    window.addEventListener('mouseup', handleEnd);
+    canvas.addEventListener('touchstart', e => { e.preventDefault(); let r = canvas.getBoundingClientRect(); handleStart(e.touches[0].clientX - r.left, e.touches[0].clientY - r.top); }, {passive: false});
+    canvas.addEventListener('touchmove', e => { e.preventDefault(); let r = canvas.getBoundingClientRect(); handleMove(e.touches[0].clientX - r.left, e.touches[0].clientY - r.top); }, {passive: false});
+    window.addEventListener('touchend', handleEnd);
+
+    // ==========================================
+    // PHYSICS (HOST ONLY)
+    // ==========================================
+    let lastTime = Date.now();
+    function hostPhysicsLoop() {
+        if(state.phase !== 'playing') return;
+        
+        let now = Date.now();
+        let dt = (now - lastTime) / 1000;
+        lastTime = now;
+        
+        let pRad = arenaSize * CONFIG.PLAYER_RADIUS_RATIO;
+        let bSize = arenaSize * CONFIG.BOX_SIZE_RATIO;
+        
+        // Bomb Timer
+        state.timer -= dt;
+        if(state.timer <= 0) {
+            state.timer = 0;
+            state.players[state.bomb].alive = false;
+            checkRoundEnd();
+        }
+
+        // Apply friction and move players
+        Object.keys(state.players).forEach(id => {
+            let p = state.players[id];
+            if(!p.alive) return;
+            p.vx *= CONFIG.PLAYER_FRICTION;
+            p.vy *= CONFIG.PLAYER_FRICTION;
+            p.x += p.vx * dt;
+            p.y += p.vy * dt;
+            
+            // Wall collisions
+            if(p.x < pRad) { p.x = pRad; p.vx *= -0.5; }
+            if(p.x > arenaSize - pRad) { p.x = arenaSize - pRad; p.vx *= -0.5; }
+            if(p.y < pRad) { p.y = pRad; p.vy *= -0.5; }
+            if(p.y > arenaSize - pRad) { p.y = arenaSize - pRad; p.vy *= -0.5; }
+        });
+
+        // Box Physics
+        state.boxes.forEach(b => {
+            b.vx *= CONFIG.BOX_FRICTION;
+            b.vy *= CONFIG.BOX_FRICTION;
+            b.x += b.vx * dt;
+            b.y += b.vy * dt;
+            
+            let half = bSize/2;
+            if(b.x < half) { b.x = half; b.vx *= -0.5; }
+            if(b.x > arenaSize - half) { b.x = arenaSize - half; b.vx *= -0.5; }
+            if(b.y < half) { b.y = half; b.vy *= -0.5; }
+            if(b.y > arenaSize - half) { b.y = arenaSize - half; b.vy *= -0.5; }
+        });
+
+        // Collisions: Player vs Box (Circle vs AABB)
+        Object.keys(state.players).forEach(id => {
+            let p = state.players[id];
+            if(!p.alive) return;
+            state.boxes.forEach(b => {
+                let testX = Math.max(b.x - bSize/2, Math.min(p.x, b.x + bSize/2));
+                let testY = Math.max(b.y - bSize/2, Math.min(p.y, b.y + bSize/2));
+                let distX = p.x - testX;
+                let distY = p.y - testY;
+                let distance = Math.hypot(distX, distY);
+
+                if(distance < pRad) {
+                    let overlap = pRad - distance;
+                    let nx = distX / distance;
+                    let ny = distY / distance;
+                    
+                    p.x += nx * overlap;
+                    p.y += ny * overlap;
+                    
+                    // Transfer momentum heavily to box, stop player
+                    b.vx -= nx * Math.hypot(p.vx, p.vy) * 0.8;
+                    b.vy -= ny * Math.hypot(p.vx, p.vy) * 0.8;
+                    p.vx *= 0.2;
+                    p.vy *= 0.2;
                 }
-            }
-            localBomb.carrierId = null;
-            localBomb.fuseEndTime = null;
-            if (hostSyncInterval) clearInterval(hostSyncInterval);
-            hostSyncInterval = null;
-
-            update(roomRef, {
-                gamePhase: gamePhase,
-                roundWinner: localRoundWinner,
-                matchWinner: localMatchWinner,
-                matchScores: localMatchScores,
-                bomb: { carrierId: null, fuseEndTime: null },
-                countdownEndTime: null,
             });
-            syncHostState();
+        });
 
-            if (gamePhase === 'matchEnd') {
-                // Show winner overlay (handled by processServerState)
-                setTimeout(() => {
-                    if (isHost && gamePhase === 'matchEnd') hostResetToLobby();
-                }, 8000);
-            } else {
-                setTimeout(() => {
-                    if (isHost && gamePhase === 'roundEnd') hostStartRound();
-                }, 3000);
-            }
-        }
-
-        function hostResetToLobby() {
-            if (!isHost) return;
-            gamePhase = 'lobby';
-            localRoundWinner = null;
-            localMatchWinner = null;
-            localMatchScores = {};
-            localRoundScores = {};
-            localBomb = { carrierId: null, remainingFuse: CONFIG.FUSE_DURATION, fuseEndTime: null };
-            localCountdownRemaining = 0;
-            for (const pid of Object.keys(localPlayers)) {
-                if (localPlayers[pid].connected) {
-                    localPlayers[pid].alive = true;
-                    localPlayers[pid].score = 0;
-                    localPlayers[pid].x = arenaSize * 0.5;
-                    localPlayers[pid].y = arenaSize * 0.5;
-                    localPlayers[pid].vx = 0;
-                    localPlayers[pid].vy = 0;
-                    localPlayers[pid].displayX = arenaSize * 0.5;
-                    localPlayers[pid].displayY = arenaSize * 0.5;
-                }
-            }
-            localBoxes = initializeBoxPositions();
-            explosions = [];
-            if (hostSyncInterval) clearInterval(hostSyncInterval);
-            hostSyncInterval = null;
-
-            const boxData = {};
-            for (const b of localBoxes) boxData['box_' + b.id] = { x: b.x, y: b.y, vx: 0, vy: 0 };
-            update(roomRef, {
-                gamePhase: 'lobby',
-                roundWinner: null,
-                matchWinner: null,
-                matchScores: {},
-                roundScores: {},
-                bomb: { carrierId: null, fuseEndTime: null },
-                countdownEndTime: null,
-                boxes: boxData,
-            });
-            syncHostState();
-
-            // Show lobby overlay for all
-            lobbyOverlay.classList.remove('hidden');
-            roomDisplay.classList.remove('hidden');
-            document.getElementById('lobbyMain').classList.add('hidden');
-            document.getElementById('lobbyRoom').classList.add('hidden');
-            document.querySelector('#lobbyOverlay .overlay-card').style.paddingBottom = '12px';
-            startBtn.classList.toggle('hidden', Object.values(localPlayers).filter(p => p.connected).length < 2);
-            updatePlayerListUI();
-            winnerOverlay.classList.add('hidden');
-        }
-
-        // ─── Dash Command Listener (Host) ───
-        function setupDashCommandListener() {
-            if (dashListenerUnsubscribe) dashListenerUnsubscribe();
-            if (!roomCode) return;
-            dashListenerUnsubscribe = onValue(ref(db, '/rooms/' + roomCode + '/players'), (snap) => {
-                const data = snap.val();
-                if (!data || !isHost) return;
-                for (const pid of Object.keys(data)) {
-                    if (pid === myPlayerId) continue;
-                    const cmd = data[pid]?.dashCommand;
-                    if (cmd?.timestamp) {
-                        const lp = localPlayers[pid];
-                        if (lp?.alive && cmd.timestamp > (lp._lastDashProcessed || 0)) {
-                            const isCarrier = pid === localBomb.carrierId;
-                            const lockout = (isCarrier ? CONFIG.CARRIER_LOCKOUT : CONFIG.MIN_LOCKOUT) * 1000;
-                            const speed = Math.sqrt(lp.vx * lp.vx + lp.vy * lp.vy);
-                            if (Date.now() - (lp._lastDashTime || 0) >= lockout && speed <= CONFIG
-                                .NEAR_ZERO_VELOCITY_THRESHOLD) {
-                                applyDash(pid, cmd.dx, cmd.dy, cmd.power);
-                                lp._lastDashTime = Date.now();
-                            }
-                            lp._lastDashProcessed = cmd.timestamp;
-                            // Clear the command
-                            set(ref(db, '/rooms/' + roomCode + '/players/' + pid + '/dashCommand'), null);
-                        }
-                    }
-                }
-            });
-        }
-
-        // ─── Apply Dash ───
-        function applyDash(pid, dx, dy, power) {
-            const p = localPlayers[pid];
-            if (!p || !p.alive) return;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-            if (dist < 0.001) return;
-            const nx = dx / dist,
-                ny = dy / dist;
-            const speed = power * arenaSize * CONFIG.DASH_SPEED_SCALAR;
-            p.vx = nx * speed;
-            p.vy = ny * speed;
-            lastDashTime = Date.now();
-            if (pid === myPlayerId) lastProcessedDashTimestamp = Date.now();
-        }
-
-        // ─── Physics ───
-        let lastPhysicsTime = 0;
-
-        function hostPhysicsLoop(ts) {
-            if (!lastPhysicsTime) lastPhysicsTime = ts;
-            let dt = (ts - lastPhysicsTime) / 1000;
-            lastPhysicsTime = ts;
-            if (dt > 0.1) dt = 0.1;
-            if (dt <= 0) dt = 0.016;
-
-            if (isHost && (gamePhase === 'playing' || gamePhase === 'countdown')) {
-                runHostPhysics(dt);
-            }
-            interpolateDisplayPositions();
-            render(ts, dt);
-            requestAnimationFrame(hostPhysicsLoop);
-        }
-
-        function runHostPhysics(dt) {
-            const fricP = Math.pow(CONFIG.PLAYER_FRICTION, dt * 60);
-            const fricB = Math.pow(CONFIG.BOX_FRICTION, dt * 60);
-            const th = CONFIG.NEAR_ZERO_VELOCITY_THRESHOLD;
-
-            // Apply local dash
-            if (pendingDashCommand && localPlayers[myPlayerId]?.alive) {
-                applyDash(myPlayerId, pendingDashCommand.dx, pendingDashCommand.dy, pendingDashCommand.power);
-                pendingDashCommand = null;
-            }
-
-            const pr = CONFIG.PLAYER_RADIUS_RATIO * arenaSize;
-            const boxSize = CONFIG.BOX_SIZE_RATIO * arenaSize;
-            const halfBox = boxSize / 2;
-
-            // Move players
-            for (const p of Object.values(localPlayers)) {
-                if (!p || !p.alive) continue;
-                p.x += p.vx * dt;
-                p.y += p.vy * dt;
-                p.vx *= fricP;
-                p.vy *= fricP;
-                if (Math.abs(p.vx) < th * dt) p.vx = 0;
-                if (Math.abs(p.vy) < th * dt) p.vy = 0;
-                p.x = clamp(p.x, pr, arenaSize - pr);
-                p.y = clamp(p.y, pr, arenaSize - pr);
-                if (p.x <= pr || p.x >= arenaSize - pr) p.vx = 0;
-                if (p.y <= pr || p.y >= arenaSize - pr) p.vy = 0;
-            }
-
-            // Move boxes
-            for (const box of localBoxes) {
-                box.x += box.vx * dt;
-                box.y += box.vy * dt;
-                box.vx *= fricB;
-                box.vy *= fricB;
-                if (Math.abs(box.vx) < th * dt * 0.5) box.vx = 0;
-                if (Math.abs(box.vy) < th * dt * 0.5) box.vy = 0;
-                box.x = clamp(box.x, halfBox, arenaSize - halfBox);
-                box.y = clamp(box.y, halfBox, arenaSize - halfBox);
-                if (box.x <= halfBox || box.x >= arenaSize - halfBox) box.vx = 0;
-                if (box.y <= halfBox || box.y >= arenaSize - halfBox) box.vy = 0;
-            }
-
-            // Player ↔ Box collision
-            for (const p of Object.values(localPlayers)) {
-                if (!p || !p.alive) continue;
-                for (const box of localBoxes) {
-                    // Closest point on box to player center
-                    const cx = clamp(p.x, box.x - halfBox, box.x + halfBox);
-                    const cy = clamp(p.y, box.y - halfBox, box.y + halfBox);
-                    const dx = p.x - cx;
-                    const dy = p.y - cy;
-                    const dist = Math.sqrt(dx * dx + dy * dy);
-                    if (dist < pr && dist > 0.001) {
-                        const overlap = pr - dist;
-                        const nx = dx / dist;
-                        const ny = dy / dist;
-                        p.x += nx * overlap;
-                        p.y += ny * overlap;
-                        const dot = p.vx * nx + p.vy * ny;
-                        if (dot > 0) {
-                            const t = CONFIG.BOX_MOMENTUM_TRANSFER;
-                            box.vx += nx * dot * t;
-                            box.vy += ny * dot * t;
-                            p.vx -= nx * dot;
-                            p.vy -= ny * dot;
-                        }
-                        p.vx *= CONFIG.PLAYER_BOX_BRAKE;
-                        p.vy *= CONFIG.PLAYER_BOX_BRAKE;
-                    }
-                }
-            }
-
-            // Box ↔ Box collision
-            for (let i = 0; i < localBoxes.length; i++) {
-                for (let j = i + 1; j < localBoxes.length; j++) {
-                    const a = localBoxes[i],
-                        b = localBoxes[j];
-                    const ox = (halfBox + halfBox) - Math.abs(a.x - b.x);
-                    const oy = (halfBox + halfBox) - Math.abs(a.y - b.y);
-                    if (ox > 0 && oy > 0) {
-                        if (ox < oy) {
-                            const s = a.x < b.x ? -1 : 1;
-                            a.x += s * ox / 2;
-                            b.x -= s * ox / 2;
-                            const tv = a.vx;
-                            a.vx = b.vx * 0.5;
-                            b.vx = tv * 0.5;
-                        } else {
-                            const s = a.y < b.y ? -1 : 1;
-                            a.y += s * oy / 2;
-                            b.y -= s * oy / 2;
-                            const tv = a.vy;
-                            a.vy = b.vy * 0.5;
-                            b.vy = tv * 0.5;
-                        }
-                    }
-                }
-            }
-
-            // Player ↔ Player + bomb pass
-            const aliveList = Object.entries(localPlayers).filter(([_, p]) => p.alive && p.connected);
-            for (let i = 0; i < aliveList.length; i++) {
-                for (let j = i + 1; j < aliveList.length; j++) {
-                    const [idA, a] = aliveList[i];
-                    const [idB, b] = aliveList[j];
-                    const dx = a.x - b.x,
-                        dy = a.y - b.y;
-                    const dist = Math.sqrt(dx * dx + dy * dy);
-                    if (dist < pr * 2 && dist > 0.001) {
-                        const overlap = (pr * 2 - dist) / 2;
-                        const nx = dx / dist,
-                            ny = dy / dist;
-                        a.x += nx * overlap;
-                        a.y += ny * overlap;
-                        b.x -= nx * overlap;
-                        b.y -= ny * overlap;
-                        // Pass bomb on contact
-                        if (localBomb.carrierId === idA && b.alive) {
-                            localBomb.carrierId = idB;
-                            localBomb.fuseEndTime = Date.now() + localBomb.remainingFuse * 1000;
-                        } else if (localBomb.carrierId === idB && a.alive) {
-                            localBomb.carrierId = idA;
-                            localBomb.fuseEndTime = Date.now() + localBomb.remainingFuse * 1000;
-                        }
-                        const relVx = a.vx - b.vx,
-                            relVy = a.vy - b.vy;
-                        const relDotN = relVx * nx + relVy * ny;
-                        if (relDotN > 0) {
-                            a.vx -= nx * relDotN * 0.5;
-                            a.vy -= ny * relDotN * 0.5;
-                            b.vx += nx * relDotN * 0.5;
-                            b.vy += ny * relDotN * 0.5;
-                        }
-                    }
-                }
-            }
-
-            // Bomb fuse
-            if (localBomb.carrierId && localBomb.fuseEndTime) {
-                localBomb.remainingFuse = Math.max(0, (localBomb.fuseEndTime - Date.now()) / 1000);
-                if (localBomb.remainingFuse <= 0 && localPlayers[localBomb.carrierId]?.alive) {
-                    hostEliminatePlayer(localBomb.carrierId);
-                }
-            }
-            // If carrier died or disconnected, reassign
-            if (localBomb.carrierId && (!localPlayers[localBomb.carrierId] || !localPlayers[localBomb.carrierId].alive)) {
-                const remaining = Object.entries(localPlayers).filter(([_, p]) => p.alive && p.connected);
-                if (remaining.length >= 2) {
-                    const r = Math.floor(Math.random() * remaining.length);
-                    localBomb.carrierId = remaining[r][0];
-                    localBomb.fuseEndTime = Date.now() + CONFIG.FUSE_DURATION * 1000;
-                    localBomb.remainingFuse = CONFIG.FUSE_DURATION;
-                } else {
-                    localBomb.carrierId = null;
-                    localBomb.fuseEndTime = null;
+        // Collisions: Player vs Player (Bomb transfer)
+        let ids = Object.keys(state.players);
+        for(let i=0; i<ids.length; i++) {
+            for(let j=i+1; j<ids.length; j++) {
+                let p1 = state.players[ids[i]];
+                let p2 = state.players[ids[j]];
+                if(!p1.alive || !p2.alive) continue;
+                
+                let dx = p1.x - p2.x;
+                let dy = p1.y - p2.y;
+                let dist = Math.hypot(dx, dy);
+                if(dist < pRad * 2) {
+                    // Resolve overlap
+                    let overlap = (pRad * 2) - dist;
+                    p1.x += (dx/dist) * (overlap/2);
+                    p1.y += (dy/dist) * (overlap/2);
+                    p2.x -= (dx/dist) * (overlap/2);
+                    p2.y -= (dy/dist) * (overlap/2);
+                    
+                    // Swap bomb
+                    if(state.bomb === ids[i]) state.bomb = ids[j];
+                    else if(state.bomb === ids[j]) state.bomb = ids[i];
                 }
             }
         }
+        
+        // Sync State
+        db.ref('rooms/'+roomCode+'/state').set(state);
+    }
 
-        function interpolateDisplayPositions() {
-            const f = CONFIG.INTERP_LERP_FACTOR;
-            for (const p of Object.values(localPlayers)) {
-                p.displayX += (p.x - p.displayX) * f;
-                p.displayY += (p.y - p.displayY) * f;
+    function checkRoundEnd() {
+        let aliveIds = Object.keys(state.players).filter(id => state.players[id].alive);
+        if(aliveIds.length <= 1) {
+            state.phase = 'round_over';
+            let winnerId = aliveIds[0];
+            if(winnerId) {
+                scores[winnerId] = (scores[winnerId] || 0) + 1;
+                db.ref('rooms/'+roomCode+'/scores').set(scores);
+                if(scores[winnerId] >= CONFIG.ROUNDS_TO_WIN) {
+                    state.phase = 'match_over';
+                    db.ref('rooms/'+roomCode+'/state').set(state);
+                    return;
+                }
             }
-            for (const b of localBoxes) {
-                b.displayX += (b.x - b.displayX) * f;
-                b.displayY += (b.y - b.displayY) * f;
-            }
+            db.ref('rooms/'+roomCode+'/state').set(state);
+            setTimeout(() => resetRound(false), 3000);
+        }
+    }
+
+    // ==========================================
+    // RENDER (ALL CLIENTS)
+    // ==========================================
+    function updateUI() {
+        let scoreStr = "Scores: ";
+        Object.keys(scores).forEach(id => {
+            let c = state.players[id]?.color || '#fff';
+            scoreStr += `<span style="color:${c}">${scores[id]}</span> `;
+        });
+        document.getElementById('scores-display').innerHTML = scoreStr;
+        
+        let msg = document.getElementById('message');
+        if(state.phase === 'countdown') { msg.style.display = 'block'; msg.innerText = Math.ceil(state.timer); }
+        else if(state.phase === 'round_over') { msg.style.display = 'block'; msg.innerText = "Round Over!"; }
+        else if(state.phase === 'match_over') { msg.style.display = 'block'; msg.innerText = "MATCH OVER!"; }
+        else { msg.style.display = 'none'; }
+    }
+
+    function render() {
+        ctx.clearRect(0, 0, arenaSize, arenaSize);
+        
+        // Grid Floor
+        ctx.strokeStyle = "rgba(0,0,0,0.05)";
+        ctx.lineWidth = 1;
+        for(let i=0; i<arenaSize; i+=40) {
+            ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, arenaSize); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(arenaSize, i); ctx.stroke();
         }
 
-        // ─── Render ───
-        function render(ts, dt) {
-            ctx.clearRect(0, 0, arenaSize, arenaSize);
+        let bSize = arenaSize * CONFIG.BOX_SIZE_RATIO;
+        let pRad = arenaSize * CONFIG.PLAYER_RADIUS_RATIO;
 
-            // Background
-            ctx.fillStyle = CONFIG.ARENA_BG_COLOR;
-            ctx.fillRect(0, 0, arenaSize, arenaSize);
+        // Draw Boxes
+        state.boxes.forEach(b => {
+            ctx.fillStyle = "#7f8c8d";
+            ctx.strokeStyle = "#2c3e50";
+            ctx.lineWidth = 3;
+            ctx.fillRect(b.x - bSize/2, b.y - bSize/2, bSize, bSize);
+            ctx.strokeRect(b.x - bSize/2, b.y - bSize/2, bSize, bSize);
+        });
 
-            // Grid
-            const gs = arenaSize / 20;
-            ctx.strokeStyle = CONFIG.ARENA_GRID_COLOR;
-            ctx.lineWidth = 0.5;
-            for (let x = gs; x < arenaSize; x += gs) { ctx.beginPath();
-                ctx.moveTo(x, 0);
-                ctx.lineTo(x, arenaSize);
-                ctx.stroke(); }
-            for (let y = gs; y < arenaSize; y += gs) { ctx.beginPath();
-                ctx.moveTo(0, y);
-                ctx.lineTo(arenaSize, y);
-                ctx.stroke(); }
+        // Draw Players
+        Object.keys(state.players).forEach(id => {
+            let p = state.players[id];
+            ctx.globalAlpha = p.alive ? 1 : 0.3;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, pRad, 0, Math.PI*2);
+            ctx.fillStyle = p.color;
+            ctx.fill();
+            ctx.lineWidth = 4;
+            ctx.strokeStyle = (state.bomb === id && p.alive) ? (Date.now()%300<150 ? '#e74c3c' : '#fff') : '#2c3e50';
+            ctx.stroke();
+            ctx.globalAlpha = 1.0;
+        });
 
-            // Border
-            const bw = CONFIG.ARENA_BORDER_WIDTH_RATIO * arenaSize;
-            ctx.strokeStyle = CONFIG.ARENA_BORDER_COLOR;
-            ctx.lineWidth = bw;
-            ctx.strokeRect(bw / 2, bw / 2, arenaSize - bw, arenaSize - bw);
-
-            // Boxes
-            const boxSize = CONFIG.BOX_SIZE_RATIO * arenaSize;
-            for (const box of localBoxes) {
-                const bx = box.displayX - boxSize / 2;
-                const by = box.displayY - boxSize / 2;
-                // Shadow
-                ctx.shadowColor = 'rgba(0,0,0,0.4)';
-                ctx.shadowBlur = 8;
-                ctx.fillStyle = '#5c4a3d';
-                ctx.fillRect(bx, by, boxSize, boxSize);
-                ctx.shadowBlur = 0;
-                ctx.strokeStyle = '#1a1008';
-                ctx.lineWidth = Math.max(2, boxSize * 0.12);
-                ctx.strokeRect(bx, by, boxSize, boxSize);
-                // Highlight
-                ctx.fillStyle = 'rgba(255,255,255,0.08)';
-                ctx.fillRect(bx + boxSize * 0.1, by + boxSize * 0.1, boxSize * 0.5, boxSize * 0.3);
-            }
-
-            // Players
-            const pr = CONFIG.PLAYER_RADIUS_RATIO * arenaSize;
-            const entries = Object.entries(localPlayers).filter(([_, p]) => p.connected || p.alive === false);
-            entries.sort((a, b) => (a[0] === localBomb.carrierId ? 1 : (b[0] === localBomb.carrierId ? -1 : 0)));
-
-            for (const [pid, p] of entries) {
-                if (!p) continue;
-                if (!p.connected && !p.alive && p._disconnectTime && Date.now() - p._disconnectTime > 10000) continue;
-                const px = p.displayX,
-                    py = p.displayY;
-                const alive = p.alive && p.connected;
-                const carrier = pid === localBomb.carrierId && alive;
-
-                ctx.save();
-                if (!alive) ctx.globalAlpha = CONFIG.GHOST_OPACITY;
-
-                // Bomb glow
-                if (carrier) {
-                    const pulse = 0.6 + 0.4 * Math.sin(ts / 1000 * CONFIG.BOMB_PULSE_SPEED * Math.PI * 2);
-                    const gr = pr * (2.0 + pulse * 1.2);
-                    const g = ctx.createRadialGradient(px, py, pr * 0.5, px, py, gr);
-                    g.addColorStop(0, CONFIG.BOMB_GLOW_COLOR);
-                    g.addColorStop(0.5, 'rgba(255,80,20,0.4)');
-                    g.addColorStop(1, 'rgba(255,30,0,0)');
-                    ctx.fillStyle = g;
-                    ctx.beginPath();
-                    ctx.arc(px, py, gr, 0, Math.PI * 2);
-                    ctx.fill();
-                }
-
-                // Body
-                const body = ctx.createRadialGradient(px - pr * 0.3, py - pr * 0.3, pr * 0.1, px, py, pr);
-                body.addColorStop(0, '#fff');
-                body.addColorStop(0.4, p.color);
-                body.addColorStop(1, 'rgba(0,0,0,0.4)');
-                ctx.fillStyle = body;
+        // Slingshot Preview Line
+        if(localInputs.dragging && state.phase === 'playing' && state.players[myId]?.alive) {
+            let p = state.players[myId];
+            let dx = localInputs.startX - localInputs.currentX;
+            let dy = localInputs.startY - localInputs.currentY;
+            let dist = Math.hypot(dx, dy);
+            let maxDrag = arenaSize * CONFIG.MAX_DRAG_RADIUS_RATIO;
+            
+            if(dist > 0) {
+                let power = Math.min(dist, maxDrag);
+                let drawX = p.x + (dx/dist) * power;
+                let drawY = p.y + (dy/dist) * power;
+                
                 ctx.beginPath();
-                ctx.arc(px, py, pr, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.strokeStyle = 'rgba(0,0,0,0.5)';
-                ctx.lineWidth = Math.max(1.5, pr * 0.2);
-                ctx.stroke();
-
-                // Bomb on head
-                if (carrier) {
-                    const bs = pr * 0.7;
-                    ctx.fillStyle = '#111';
-                    ctx.beginPath();
-                    ctx.arc(px, py - pr * 0.3, bs, 0, Math.PI * 2);
-                    ctx.fill();
-                    ctx.fillStyle = CONFIG.BOMB_GLOW_COLOR;
-                    ctx.beginPath();
-                    ctx.arc(px, py - pr * 0.3, bs * 0.7, 0, Math.PI * 2);
-                    ctx.fill();
-                    ctx.strokeStyle = '#ffaa00';
-                    ctx.lineWidth = 1.5;
-                    ctx.beginPath();
-                    ctx.moveTo(px, py - pr * 0.3 - bs);
-                    ctx.quadraticCurveTo(px + Math.cos(ts / 200) * bs * 1.5, py - pr * 0.3 - bs * 1.2, px + Math.cos(ts / 200 *
-                        1.7) * bs * 2, py - pr * 0.3 - bs * 0.5);
-                    ctx.stroke();
-                }
-
-                // Name
-                ctx.fillStyle = 'rgba(0,0,0,0.7)';
-                const nw = ctx.measureText(p.name).width + 10;
-                ctx.fillRect(px - nw / 2, py - pr - 22, nw, 18);
-                ctx.fillStyle = '#fff';
-                ctx.font = Math.max(10, pr * 0.7) + 'px sans-serif';
-                ctx.textAlign = 'center';
-                ctx.fillText(p.name, px, py - pr - 8);
-
-                ctx.restore();
-            }
-
-            // Bomb timer (center)
-            if (gamePhase === 'playing' && localBomb.carrierId && localBomb.fuseEndTime) {
-                const r = Math.max(0, (localBomb.fuseEndTime - Date.now()) / 1000);
-                if (r > 0) {
-                    const cx = arenaSize / 2,
-                        cy = arenaSize / 2;
-                    ctx.save();
-                    ctx.globalAlpha = 0.45;
-                    const ring = 1 + 0.08 * Math.sin(ts / 300);
-                    ctx.strokeStyle = r < 4 ? '#ff3333' : r < 7 ? '#ffaa00' : '#fff';
-                    ctx.lineWidth = Math.max(3, arenaSize * 0.008);
-                    ctx.beginPath();
-                    ctx.arc(cx, cy, arenaSize * 0.12 * ring, 0, Math.PI * 2);
-                    ctx.stroke();
-                    ctx.font = 'bold ' + arenaSize * 0.14 + 'px monospace';
-                    ctx.textAlign = 'center';
-                    ctx.textBaseline = 'middle';
-                    ctx.fillStyle = r < 4 ? '#ff3333' : r < 7 ? '#ffaa00' : '#fff';
-                    ctx.fillText(Math.ceil(r), cx, cy);
-                    ctx.restore();
-                }
-            }
-
-            // Countdown
-            if (gamePhase === 'countdown' && localCountdownRemaining > 0) {
-                ctx.save();
-                ctx.globalAlpha = 0.7;
-                ctx.font = 'bold ' + arenaSize * 0.2 + 'px monospace';
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.fillStyle = '#fff';
-                ctx.fillText(Math.ceil(localCountdownRemaining), arenaSize / 2, arenaSize / 2);
-                ctx.restore();
-            }
-
-            // Drag indicator
-            if (dragActive && myPlayerId && localPlayers[myPlayerId]?.alive) {
-                const p = localPlayers[myPlayerId];
-                const px = p.displayX,
-                    py = p.displayY;
-                const dx = dragCurrentX - dragStartX,
-                    dy = dragCurrentY - dragStartY;
-                const maxDrag = CONFIG.MAX_DRAG_RADIUS_RATIO * arenaSize;
-                const dist = Math.min(Math.sqrt(dx * dx + dy * dy), maxDrag);
-                const angle = Math.atan2(dy, dx);
-                const dashAngle = angle + Math.PI;
-                const dex = px + Math.cos(dashAngle) * dist;
-                const dey = py + Math.sin(dashAngle) * dist;
-
-                ctx.save();
-                ctx.strokeStyle = 'rgba(255,255,255,0.5)';
-                ctx.lineWidth = Math.max(2, arenaSize * 0.004);
-                ctx.setLineDash([8, 6]);
-                ctx.beginPath();
-                ctx.moveTo(px, py);
-                ctx.lineTo(dex, dey);
+                ctx.moveTo(p.x, p.y);
+                ctx.lineTo(drawX, drawY);
+                ctx.strokeStyle = "rgba(255, 255, 255, 0.5)";
+                ctx.setLineDash([5, 5]);
+                ctx.lineWidth = 3;
                 ctx.stroke();
                 ctx.setLineDash([]);
-
-                const arrow = Math.max(8, arenaSize * 0.02);
-                ctx.fillStyle = 'rgba(255,255,255,0.7)';
-                ctx.beginPath();
-                ctx.moveTo(dex, dey);
-                ctx.lineTo(dex + Math.cos(dashAngle + Math.PI * 0.75) * arrow, dey + Math.sin(dashAngle + Math.PI * 0.75) *
-                    arrow);
-                ctx.lineTo(dex + Math.cos(dashAngle - Math.PI * 0.75) * arrow, dey + Math.sin(dashAngle - Math.PI * 0.75) *
-                    arrow);
-                ctx.closePath();
-                ctx.fill();
-
-                const power = dist / maxDrag;
-                ctx.strokeStyle = `rgba(255,255,255,${0.3 + power * 0.5})`;
-                ctx.lineWidth = Math.max(2, arenaSize * 0.005);
-                ctx.beginPath();
-                ctx.arc(px, py, pr * 1.8, dashAngle - Math.PI * power, dashAngle + Math.PI * power);
-                ctx.stroke();
-                ctx.restore();
-            }
-
-            // Explosions
-            const now = Date.now();
-            for (let i = explosions.length - 1; i >= 0; i--) {
-                const exp = explosions[i];
-                const elapsed = (now - exp.startTime) / exp.duration;
-                if (elapsed >= 1) { explosions.splice(i, 1); continue; }
-                const rad = exp.maxRadius * elapsed;
-                const alpha = 1 - elapsed;
-                ctx.save();
-                ctx.globalAlpha = alpha;
-                const g = ctx.createRadialGradient(exp.x, exp.y, rad * 0.2, exp.x, exp.y, rad);
-                g.addColorStop(0, '#fff');
-                g.addColorStop(0.3, '#ffaa00');
-                g.addColorStop(0.7, '#ff3300');
-                g.addColorStop(1, 'rgba(255,20,0,0)');
-                ctx.fillStyle = g;
-                ctx.beginPath();
-                ctx.arc(exp.x, exp.y, rad, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.restore();
-            }
-
-            // Round end overlay
-            if (gamePhase === 'roundEnd' && localRoundWinner) {
-                ctx.save();
-                ctx.fillStyle = 'rgba(0,0,0,0.5)';
-                ctx.fillRect(0, 0, arenaSize, arenaSize);
-                ctx.fillStyle = '#fff';
-                ctx.font = 'bold ' + arenaSize * 0.06 + 'px sans-serif';
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.fillText((localPlayers[localRoundWinner]?.name || 'Someone') + ' wins the round!', arenaSize / 2,
-                    arenaSize / 2);
-                ctx.restore();
             }
         }
 
-        // ─── Input ───
-        function getCanvasPos(e) {
-            const rect = canvas.getBoundingClientRect();
-            const sx = arenaSize / rect.width,
-                sy = arenaSize / rect.height;
-            let cx, cy;
-            if (e.touches?.length) { cx = e.touches[0].clientX;
-                cy = e.touches[0].clientY; } else if (e.changedTouches?.length) { cx = e.changedTouches[0].clientX;
-                cy = e.changedTouches[0].clientY; } else { cx = e.clientX;
-                cy = e.clientY; }
-            return { x: (cx - rect.left) * sx, y: (cy - rect.top) * sy };
+        // Center Timer
+        if(state.phase === 'playing') {
+            ctx.fillStyle = "rgba(0,0,0,0.2)";
+            ctx.font = "bold " + (arenaSize*0.3) + "px sans-serif";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(Math.ceil(state.timer), arenaSize/2, arenaSize/2);
         }
 
-        function handleDragStart(e) {
-            if (gamePhase !== 'playing' || !myPlayerId || !localPlayers[myPlayerId]?.alive) return;
-            const pos = getCanvasPos(e);
-            dragActive = true;
-            dragStartX = pos.x;
-            dragStartY = pos.y;
-            dragCurrentX = pos.x;
-            dragCurrentY = pos.y;
-            e.preventDefault();
-        }
-
-        function handleDragMove(e) {
-            if (!dragActive) return;
-            const pos = getCanvasPos(e);
-            dragCurrentX = pos.x;
-            dragCurrentY = pos.y;
-            e.preventDefault();
-        }
-
-        function handleDragEnd(e) {
-            if (!dragActive) return;
-            dragActive = false;
-            const pos = e.changedTouches ? getCanvasPos(e) : { x: dragCurrentX, y: dragCurrentY };
-            dragCurrentX = pos.x;
-            dragCurrentY = pos.y;
-            if (!myPlayerId || !localPlayers[myPlayerId]?.alive || gamePhase !== 'playing') return;
-
-            const p = localPlayers[myPlayerId];
-            const now = Date.now();
-            const isCarrier = myPlayerId === localBomb.carrierId;
-            const lockout = (isCarrier ? CONFIG.CARRIER_LOCKOUT : CONFIG.MIN_LOCKOUT) * 1000;
-            if (now - lastDashTime < lockout) return;
-            if (Math.sqrt(p.vx * p.vx + p.vy * p.vy) > CONFIG.NEAR_ZERO_VELOCITY_THRESHOLD) return;
-
-            const dx = dragCurrentX - dragStartX,
-                dy = dragCurrentY - dragStartY;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-            const maxDrag = CONFIG.MAX_DRAG_RADIUS_RATIO * arenaSize;
-            const capped = Math.min(dist, maxDrag);
-            if (capped < 3) return;
-            const power = capped / maxDrag;
-            const nx = -dx / dist,
-                ny = -dy / dist;
-            const speed = power * arenaSize * CONFIG.DASH_SPEED_SCALAR;
-            p.vx = nx * speed;
-            p.vy = ny * speed;
-            lastDashTime = now;
-            lastProcessedDashTimestamp = now;
-
-            if (myPlayerRef && !isHost) {
-                set(ref(db, '/rooms/' + roomCode + '/players/' + myPlayerId + '/dashCommand'), { dx: nx, dy: ny, power,
-                    timestamp: now });
-            } else if (isHost) {
-                pendingDashCommand = { dx: nx, dy: ny, power };
-            }
-            e.preventDefault();
-        }
-
-        canvas.addEventListener('mousedown', handleDragStart);
-        canvas.addEventListener('mousemove', handleDragMove);
-        canvas.addEventListener('mouseup', handleDragEnd);
-        canvas.addEventListener('mouseleave', handleDragEnd);
-        canvas.addEventListener('touchstart', handleDragStart, { passive: false });
-        canvas.addEventListener('touchmove', handleDragMove, { passive: false });
-        canvas.addEventListener('touchend', handleDragEnd, { passive: false });
-        canvas.addEventListener('touchcancel', handleDragEnd, { passive: false });
-
-        // ─── UI Events ───
-        createBtn.onclick = async () => {
-            createBtn.disabled = joinBtn.disabled = true;
-            try {
-                await createRoom();
-                setupDashCommandListener();
-            } catch (e) { console.error(e);
-                createBtn.disabled = joinBtn.disabled = false; }
-        };
-
-        joinBtn.onclick = () => {
-            document.getElementById('lobbyMain').classList.add('hidden');
-            document.getElementById('lobbyRoom').classList.remove('hidden');
-            roomCodeInput.value = '';
-            joinError.classList.add('hidden');
-            joinError.textContent = '';
-            roomCodeInput.focus();
-        };
-
-        cancelJoinBtn.onclick = () => {
-            document.getElementById('lobbyMain').classList.remove('hidden');
-            document.getElementById('lobbyRoom').classList.add('hidden');
-        };
-
-        joinConfirmBtn.onclick = async () => {
-            const code = roomCodeInput.value.trim();
-            if (!/^\d{4}$/.test(code)) {
-                joinError.textContent = 'Enter a 4-digit code.';
-                joinError.classList.remove('hidden');
-                return;
-            }
-            joinConfirmBtn.disabled = cancelJoinBtn.disabled = true;
-            try {
-                const ok = await joinRoom(code);
-                if (ok) setupDashCommandListener();
-                else { joinConfirmBtn.disabled = cancelJoinBtn.disabled = false; }
-            } catch (e) { console.error(e);
-                joinConfirmBtn.disabled = cancelJoinBtn.disabled = false; }
-        };
-
-        roomCodeInput.onkeydown = e => { if (e.key === 'Enter') joinConfirmBtn.click(); };
-
-        startBtn.onclick = () => { if (isHost && gamePhase === 'lobby') hostStartGame(); };
-
-        playAgainBtn.onclick = () => {
-            winnerOverlay.classList.add('hidden');
-            if (isHost) hostResetToLobby();
-        };
-
-        // ─── Init ───
-        function init() {
-            recalculateArenaSize();
-            localBoxes = initializeBoxPositions();
-            localPlayers = {};
-            ensureSignedIn().then(() => {
-                lobbyStatus.textContent = 'Ready – create or join a room.';
-                document.getElementById('lobbyMain').classList.remove('hidden');
-                document.getElementById('lobbyRoom').classList.add('hidden');
-                roomDisplay.classList.add('hidden');
-            });
-            requestAnimationFrame(hostPhysicsLoop);
-        }
-
-        onAuthStateChanged(auth, (user) => {
-            if (user) myPlayerId = user.uid;
-            if (roomCode && !myPlayerRef && user) {
-                myPlayerRef = ref(db, '/rooms/' + roomCode + '/players/' + user.uid);
-            }
-        });
-
-        window.addEventListener('beforeunload', () => {
-            if (myPlayerRef && roomCode) {
-                set(ref(db, '/rooms/' + roomCode + '/players/' + myPlayerId + '/connected'), false);
-            }
-            if (hostSyncInterval) clearInterval(hostSyncInterval);
-            if (dashListenerUnsubscribe) dashListenerUnsubscribe();
-            if (clientReadUnsubscribe) clientReadUnsubscribe();
-        });
-
-        document.addEventListener('visibilitychange', () => {
-            if (document.visibilityState === 'visible' && roomCode && myPlayerId && myPlayerRef) {
-                set(ref(db, '/rooms/' + roomCode + '/players/' + myPlayerId + '/connected'), true);
-            }
-        });
-
-        init();
-    </script>
+        requestAnimationFrame(render);
+    }
+</script>
 </body>
 </html>
