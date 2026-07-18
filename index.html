@@ -31,8 +31,8 @@
             MIN_LOCKOUT: 0.5,
             CARRIER_LOCKOUT: 0.3,
             MAX_DRAG_RADIUS_RATIO: 0.2,
-            PLAYER_FRICTION: 0.92,         // players slide a bit
-            BOX_FRICTION: 0.85,            // boxes are heavy, stop quickly (lower = heavier)
+            PLAYER_FRICTION: 0.92,
+            BOX_FRICTION: 0.85,
             NEAR_ZERO_VELOCITY_THRESHOLD: 5,
             BOX_SIZE_RATIO: 0.055,
             PLAYER_RADIUS_RATIO: 0.024,
@@ -40,7 +40,7 @@
             SYNC_RATE: 30,
             DASH_SPEED_SCALAR: 5.2,
             PLAYER_BOX_BRAKE: 0.35,
-            BOX_MOMENTUM_TRANSFER: 0.18,   // less speed transferred to boxes
+            BOX_MOMENTUM_TRANSFER: 0.18,
             INTERP_LERP_FACTOR: 0.28,
             EXPLOSION_DURATION: 0.8,
             COUNTDOWN_SECONDS: 3,
@@ -235,11 +235,12 @@
                 }
             }
 
+            // Clean up disconnected players faster (5s instead of 15)
             const now = Date.now();
             for (const pid of Object.keys(localPlayers)) {
                 if (!sPlayers[pid] && !localPlayers[pid].connected) {
                     if (!localPlayers[pid]._disconnectTime) localPlayers[pid]._disconnectTime = now;
-                    if (now - localPlayers[pid]._disconnectTime > 15000) delete localPlayers[pid];
+                    if (now - localPlayers[pid]._disconnectTime > 5000) delete localPlayers[pid];
                 }
             }
 
@@ -470,25 +471,29 @@
         function initializeBoxPositions() {
             const cols = 10, rows = 6;
             const cellW = arenaSize / cols, cellH = arenaSize / rows;
+            // Four corner clusters (2x2 boxes in each corner)
             const pattern = [
-                [0,0,1,1,0,0,1,1,0,0],
-                [0,0,1,0,0,0,0,0,1,0],
+                [1,1,0,0,0,0,0,0,1,1],
+                [1,1,0,0,0,0,0,0,1,1],
                 [0,0,0,0,0,0,0,0,0,0],
                 [0,0,0,0,0,0,0,0,0,0],
-                [0,0,1,0,0,0,0,0,1,0],
-                [0,0,1,1,0,0,1,1,0,0]
+                [1,1,0,0,0,0,0,0,1,1],
+                [1,1,0,0,0,0,0,0,1,1]
             ];
             localBoxes = [];
-            for (let r=0; r<rows; r++) for (let c=0; c<cols; c++) {
-                if (pattern[r][c] === 1) {
-                    localBoxes.push({
-                        id: localBoxes.length,
-                        x: c*cellW + cellW/2,
-                        y: r*cellH + cellH/2,
-                        vx:0, vy:0,
-                        displayX: c*cellW + cellW/2,
-                        displayY: r*cellH + cellH/2
-                    });
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    if (pattern[r][c] === 1) {
+                        localBoxes.push({
+                            id: localBoxes.length,
+                            x: c * cellW + cellW / 2,
+                            y: r * cellH + cellH / 2,
+                            vx: 0,
+                            vy: 0,
+                            displayX: c * cellW + cellW / 2,
+                            displayY: r * cellH + cellH / 2
+                        });
+                    }
                 }
             }
         }
@@ -507,7 +512,7 @@
 
         function runHostPhysics(dt) {
             const fricP = Math.pow(CONFIG.PLAYER_FRICTION, dt*60);
-            const fricB = Math.pow(CONFIG.BOX_FRICTION, dt*60);   // boxes much heavier now
+            const fricB = Math.pow(CONFIG.BOX_FRICTION, dt*60);
             const th = CONFIG.NEAR_ZERO_VELOCITY_THRESHOLD;
 
             for (const pid of Object.keys(localPlayers)) {
@@ -516,7 +521,7 @@
                     pendingDashCommand = null;
                 }
             }
-            processRemoteDashCommands();
+            // Remote dash commands are now handled directly in setupDashCommandListener, no need for separate processing
 
             const pr = CONFIG.PLAYER_RADIUS_RATIO*arenaSize;
             for (const p of Object.values(localPlayers)) {
@@ -543,7 +548,7 @@
                 if (box.y<=halfBox || box.y>=arenaSize-halfBox) box.vy=0;
             }
 
-            // Player-Box collision – heavy boxes
+            // Player-Box collision
             for (const p of Object.values(localPlayers)) {
                 if (!p||!p.alive) continue;
                 for (const box of localBoxes) {
@@ -557,7 +562,7 @@
                         if (dot>0) {
                             const t = CONFIG.BOX_MOMENTUM_TRANSFER;
                             box.vx += nx*dot*t; box.vy += ny*dot*t;
-                            p.vx -= nx*dot;   // reduce player's speed more directly
+                            p.vx -= nx*dot;
                             p.vy -= ny*dot;
                         }
                         p.vx *= CONFIG.PLAYER_BOX_BRAKE; p.vy *= CONFIG.PLAYER_BOX_BRAKE;
@@ -617,18 +622,6 @@
                     localBomb.carrierId = remaining[r][0];
                     localBomb.fuseEndTime = Date.now() + CONFIG.FUSE_DURATION*1000;
                 } else { localBomb.carrierId=null; localBomb.fuseEndTime=null; }
-            }
-        }
-
-        function processRemoteDashCommands() {
-            for (const pid of Object.keys(localPlayers)) {
-                const p = localPlayers[pid];
-                if (!p||pid===myPlayerId) continue;
-                if (p._pendingDash && p._pendingDash.timestamp > (p._lastDashProcessed||0)) {
-                    applyDash(pid, p._pendingDash.dx, p._pendingDash.dy, p._pendingDash.power);
-                    p._lastDashProcessed = p._pendingDash.timestamp;
-                    p._pendingDash = null;
-                }
             }
         }
 
@@ -704,9 +697,9 @@
                 ctx.restore();
             }
 
-            // Bomb timer center display
+            // Bomb timer center display – use the synced remaining time, don't overwrite
             if (gamePhase==='playing' && localBomb.carrierId && localBomb.fuseEndTime) {
-                const r = localBomb.remainingFuse = Math.max(0, (localBomb.fuseEndTime - Date.now())/1000);
+                const r = Math.max(0, (localBomb.fuseEndTime - Date.now())/1000);
                 if (r > 0) {
                     const cx=arenaSize/2, cy=arenaSize/2;
                     ctx.save(); ctx.globalAlpha=0.45;
