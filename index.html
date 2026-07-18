@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Corner Rush - Multiplayer Hot Potato</title>
-    <!-- Firebase Config: Anonymous auth + Realtime Database rules required -->
     <script type="module">
         import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js';
         import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js';
@@ -25,7 +24,7 @@
         const db = getDatabase(app);
 
         // ============================================================
-        // ★ ADJUSTABLE GAME BALANCE CONFIG ★
+        // ★★★ ADJUSTABLE GAME BALANCE CONFIG ★★★
         // ============================================================
         const CONFIG = {
             FUSE_DURATION: 12, MIN_LOCKOUT: 0.5, CARRIER_LOCKOUT: 0.3,
@@ -40,6 +39,7 @@
             ARENA_BG_COLOR: '#1a1d23', ARENA_GRID_COLOR: '#2a2d35',
             ARENA_BORDER_COLOR: '#4a5568', ARENA_BORDER_WIDTH_RATIO: 0.006,
         };
+        // ============================================================
 
         // ─────────────────────────── DOM Elements ───────────────────────────
         const canvas = document.getElementById('gameCanvas');
@@ -131,7 +131,7 @@
             onDisconnect(myPlayerRef).update({connected:false});
 
             startClientListener(code);
-            lobbyOverlay.classList.add('hidden');
+            // Lobby overlay stays visible until the game starts
             roomDisplay.textContent = 'Room: '+code;
             hudRoomCode.textContent = 'Room: '+code;
             document.getElementById('hostBadge').classList.remove('hidden');
@@ -162,7 +162,7 @@
             });
             onDisconnect(myPlayerRef).update({connected:false});
             startClientListener(code);
-            lobbyOverlay.classList.add('hidden');
+            // Lobby overlay stays visible until game starts
             roomDisplay.textContent = 'Room: '+code;
             hudRoomCode.textContent = 'Room: '+code;
             document.getElementById('hostBadge').classList.add('hidden');
@@ -213,7 +213,7 @@
             const sPlayers = data.players||{};
             for (const pid of new Set([...Object.keys(localPlayers),...Object.keys(sPlayers)])) {
                 const sp = sPlayers[pid];
-                if (!sp || !sp.connected) {
+                if (!sp || sp.connected === false) {
                     if (localPlayers[pid]) { localPlayers[pid].alive=false; localPlayers[pid].connected=false; }
                     continue;
                 }
@@ -270,7 +270,7 @@
                 isHost = (data.hostId === myPlayerId);
                 if (isHost && !wasHost) startHostSyncLoop();
                 document.getElementById('hostBadge').classList.toggle('hidden',!isHost);
-                startBtn.classList.toggle('hidden',!isHost || gamePhase!=='lobby');
+                startBtn.classList.toggle('hidden', !isHost || gamePhase !== 'lobby');
             }
             updateHUD(); updatePlayerListUI(); handleGamePhaseUI();
         }
@@ -304,8 +304,8 @@
                 </div>`;
             }).join('');
             const count = players.length;
-            lobbyStatus.textContent = count>=2?(isHost?'Ready to start! ('+count+' players)':'Waiting for host... ('+count+' players)'):'Waiting... ('+count+'/2 min)';
-            if(isHost) startBtn.classList.toggle('hidden', gamePhase!=='lobby' || count<2);
+            lobbyStatus.textContent = count>=2 ? (isHost?'Ready to start! ('+count+' players)':'Waiting for host... ('+count+' players)') : 'Waiting... ('+count+'/2 min)';
+            if (isHost) startBtn.classList.toggle('hidden', gamePhase !== 'lobby' || count < 2);
         }
 
         function handleGamePhaseUI() {
@@ -349,11 +349,13 @@
 
         // ─────────────────────────── Host Game Flow ───────────────────────────
         function hostStartGame() {
-            if (!isHost||gamePhase!=='lobby') return;
-            const connected = Object.entries(localPlayers).filter(([_,p])=>p.connected);
-            if (connected.length<2) return;
+            if (!isHost || gamePhase !== 'lobby') return;
+            const connected = Object.entries(localPlayers).filter(([_,p]) => p.connected);
+            if (connected.length < 2) return;
+            // Hide lobby and start the game
+            lobbyOverlay.classList.add('hidden');
             localMatchScores = {};
-            for (const [pid] of connected) localMatchScores[pid]=0;
+            for (const [pid] of connected) localMatchScores[pid] = 0;
             localRoundScores = {};
             hostStartRound();
         }
@@ -457,6 +459,12 @@
                 matchScores:{}, roundScores:{}, bomb:{carrierId:null,fuseEndTime:null}, countdownEndTime:null,
             });
             syncHostState();
+            // Show the lobby again
+            lobbyOverlay.classList.remove('hidden');
+            document.getElementById('lobbyMain').classList.remove('hidden');
+            document.getElementById('lobbyRoom').classList.add('hidden');
+            startBtn.classList.toggle('hidden', Object.values(localPlayers).filter(p=>p.connected).length < 2);
+            updatePlayerListUI();
         }
 
         // ─────────────────────────── Boxes & Physics ───────────────────────────
@@ -843,11 +851,10 @@
             recalculateArenaSize();
             initializeBoxPositions();
             localPlayers={}; localBoxes=[];
-            // Pre-authenticate immediately
             ensureSignedIn().then(() => {
                 lobbyStatus.textContent = 'Ready – create or join a room.';
             }).catch(err => {
-                lobbyStatus.textContent = 'Authentication failed. Check Anonymous Auth in Firebase console.';
+                lobbyStatus.textContent = 'Auth failed. Check Anonymous Auth in Firebase console.';
             });
             requestAnimationFrame(hostPhysicsLoop);
         }
