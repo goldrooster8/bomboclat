@@ -1,514 +1,1214 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Corner Rush</title>
-    <!-- Firebase CDN -->
-    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
-    
-    <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
-        body { background: #222; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; overflow: hidden; touch-action: none; }
-        #ui { position: absolute; top: 0; left: 0; width: 100%; display: flex; justify-content: space-between; padding: 10px 20px; pointer-events: none; z-index: 10; }
-        #lobby { background: #333; padding: 20px; border-radius: 8px; text-align: center; z-index: 20; }
-        #lobby input { padding: 10px; font-size: 16px; margin: 10px; text-transform: uppercase; width: 100px; text-align: center;}
-        button { padding: 10px 20px; font-size: 16px; cursor: pointer; background: #e74c3c; color: white; border: none; border-radius: 5px; margin: 5px; }
-        #game-container { display: none; position: relative; width: 100vw; height: 100vh; flex-direction: column; align-items: center; justify-content: center; }
-        canvas { background: #ecf0f1; box-shadow: 0 0 0 10px #34495e; border-radius: 4px; touch-action: none; }
-        #message { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 48px; font-weight: bold; color: #e74c3c; text-shadow: 2px 2px 0 #000; display: none; pointer-events: none; z-index: 15; text-align: center; }
-        .hud-text { font-size: 18px; font-weight: bold; background: rgba(0,0,0,0.5); padding: 5px 10px; border-radius: 4px; }
-    </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>Corner Rush</title>
+  <!--
+    Firebase setup:
+    1. Create a Firebase project.
+    2. Enable Anonymous Authentication in Authentication > Sign-in method.
+    3. Create a Realtime Database.
+    4. Replace the firebaseConfig placeholder below in the JavaScript.
+    5. For early testing, use permissive database rules. Tighten rules before public release.
+  -->
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #111318;
+      --panel: #1c2028;
+      --panel-2: #242a34;
+      --text: #f4f7fb;
+      --muted: #aab3c2;
+      --line: #3a4352;
+      --accent: #71d4ff;
+      --danger: #ff6377;
+      --good: #80e18d;
+      --warn: #ffd166;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background: radial-gradient(circle at top, #202737 0, var(--bg) 58%);
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      overflow: hidden;
+    }
+
+    body {
+      min-height: 100dvh;
+      display: flex;
+      justify-content: center;
+    }
+
+    button, input {
+      font: inherit;
+    }
+
+    button {
+      border: 1px solid var(--line);
+      background: var(--panel-2);
+      color: var(--text);
+      padding: 0.65rem 0.9rem;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+
+    button.primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #071016;
+      font-weight: 700;
+    }
+
+    button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    input {
+      width: 100%;
+      min-width: 0;
+      border: 1px solid var(--line);
+      background: #10141b;
+      color: var(--text);
+      padding: 0.65rem 0.75rem;
+      border-radius: 8px;
+      text-transform: uppercase;
+    }
+
+    .app {
+      width: min(100vw, 1240px);
+      height: 100dvh;
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr) auto;
+      gap: clamp(8px, 1.5vmin, 16px);
+      padding: clamp(8px, 1.8vmin, 18px);
+    }
+
+    .hud {
+      display: grid;
+      grid-template-columns: minmax(190px, 0.8fr) minmax(220px, 1.4fr) minmax(180px, 0.8fr);
+      gap: 10px;
+      align-items: stretch;
+    }
+
+    .panel {
+      border: 1px solid var(--line);
+      background: color-mix(in srgb, var(--panel) 92%, transparent);
+      border-radius: 8px;
+      padding: 10px;
+    }
+
+    .room-line, .status-line {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .label {
+      color: var(--muted);
+      font-size: 0.78rem;
+      line-height: 1.2;
+    }
+
+    .value {
+      font-weight: 800;
+      font-size: clamp(1rem, 2.2vmin, 1.55rem);
+      letter-spacing: 0.08em;
+      white-space: nowrap;
+    }
+
+    .scores {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .score {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 8px;
+      min-width: 0;
+      background: rgba(255,255,255,0.035);
+    }
+
+    .score .name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+
+    .score .points {
+      font-weight: 800;
+      font-size: 1.25rem;
+    }
+
+    .score.me {
+      border-color: var(--accent);
+    }
+
+    .stage {
+      min-height: 0;
+      display: grid;
+      place-items: center;
+      position: relative;
+    }
+
+    .arena-wrap {
+      position: relative;
+      width: min(100%, calc(100dvh - 178px), 980px);
+      aspect-ratio: 1 / 1;
+      min-width: min(100%, 260px);
+    }
+
+    canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      border: clamp(4px, 0.8vmin, 8px) solid #d9e4f3;
+      border-radius: 0;
+      background: #181d25;
+      touch-action: none;
+      user-select: none;
+    }
+
+    .corner-tag {
+      position: absolute;
+      color: var(--muted);
+      font-size: clamp(0.68rem, 1.8vmin, 0.88rem);
+      max-width: 38%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      pointer-events: none;
+    }
+
+    .tag-0 { left: 0; top: -1.35rem; }
+    .tag-1 { right: 0; top: -1.35rem; text-align: right; }
+    .tag-2 { left: 0; bottom: -1.35rem; }
+    .tag-3 { right: 0; bottom: -1.35rem; text-align: right; }
+
+    .overlay {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      pointer-events: none;
+      text-align: center;
+      padding: 20px;
+    }
+
+    .overlay-card {
+      pointer-events: auto;
+      width: min(520px, 100%);
+      border: 1px solid var(--line);
+      background: rgba(20, 24, 31, 0.94);
+      border-radius: 8px;
+      padding: clamp(14px, 3vmin, 24px);
+      box-shadow: 0 16px 48px rgba(0,0,0,0.35);
+    }
+
+    .overlay-card h1 {
+      margin: 0 0 8px;
+      font-size: clamp(1.6rem, 5vmin, 3rem);
+    }
+
+    .overlay-card p {
+      margin: 8px 0;
+      color: var(--muted);
+    }
+
+    .lobby-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .join-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .bottom {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .hint {
+      color: var(--muted);
+      font-size: 0.88rem;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 0.35rem 0.65rem;
+      color: var(--muted);
+      background: rgba(255,255,255,0.035);
+      font-size: 0.82rem;
+      white-space: nowrap;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--danger);
+    }
+
+    .dot.ok { background: var(--good); }
+
+    @media (max-width: 760px) {
+      .app {
+        grid-template-rows: auto minmax(0, 1fr) auto;
+      }
+
+      .hud {
+        grid-template-columns: 1fr;
+      }
+
+      .scores {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .arena-wrap {
+        width: min(100%, calc(100dvh - 318px));
+      }
+
+      .bottom {
+        grid-template-columns: 1fr;
+      }
+
+      .lobby-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 420px) {
+      .app {
+        padding: 6px;
+      }
+
+      .panel {
+        padding: 8px;
+      }
+
+      .scores {
+        gap: 6px;
+      }
+
+      .score {
+        padding: 6px;
+      }
+    }
+  </style>
 </head>
 <body>
-
-    <div id="lobby">
-        <h1>Corner Rush</h1>
-        <p>Enter 4-digit code to join, or create a room.</p>
-        <input type="text" id="room-code" maxlength="4" placeholder="CODE">
-        <br>
-        <button onclick="joinRoom()">Join Room</button>
-        <button onclick="createRoom()">Create Room</button>
-        <p id="lobby-msg" style="color:#ffcc00; margin-top:10px;"></p>
-    </div>
-
-    <div id="game-container">
-        <div id="ui">
-            <div id="room-display" class="hud-text">Room: ----</div>
-            <div id="scores-display" class="hud-text">Waiting for players...</div>
+  <main class="app">
+    <section class="hud">
+      <div class="panel">
+        <div class="room-line">
+          <div>
+            <div class="label">Room</div>
+            <div class="value" id="roomCode">----</div>
+          </div>
+          <div class="pill"><span class="dot" id="connDot"></span><span id="connText">Offline</span></div>
         </div>
-        <canvas id="gameCanvas"></canvas>
-        <div id="message"></div>
-    </div>
+      </div>
+      <div class="panel">
+        <div class="scores" id="scores"></div>
+      </div>
+      <div class="panel">
+        <div class="status-line">
+          <div>
+            <div class="label">Role</div>
+            <div id="roleText">Not joined</div>
+          </div>
+          <button id="startBtn" class="primary" disabled>Start</button>
+        </div>
+      </div>
+    </section>
 
-<script>
-    // ==========================================
-    // CONFIGURATION BLOCK
-    // ==========================================
+    <section class="stage">
+      <div class="arena-wrap">
+        <canvas id="game" aria-label="Corner Rush square arena"></canvas>
+        <div class="corner-tag tag-0" id="tag0"></div>
+        <div class="corner-tag tag-1" id="tag1"></div>
+        <div class="corner-tag tag-2" id="tag2"></div>
+        <div class="corner-tag tag-3" id="tag3"></div>
+        <div class="overlay" id="overlay">
+          <div class="overlay-card">
+            <h1>Corner Rush</h1>
+            <p>Online hot-potato dashing for 2-4 players.</p>
+            <input id="nameInput" maxlength="14" placeholder="Player name" autocomplete="nickname">
+            <div class="lobby-grid">
+              <button id="createBtn" class="primary">Create room</button>
+              <div class="join-row">
+                <input id="joinInput" inputmode="numeric" maxlength="4" placeholder="1234">
+                <button id="joinBtn">Join</button>
+              </div>
+            </div>
+            <p id="overlayMsg">Drag inside the square, release, and dash in the opposite direction.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="bottom">
+      <div class="hint" id="hint">First load hint: drag to slingshot in the opposite direction. Longer drag means stronger dash.</div>
+      <div class="pill" id="roundText">Waiting for room</div>
+    </section>
+  </main>
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-database-compat.js"></script>
+  <script>
+    // ======================== TWEAKABLE GAME BALANCE CONFIG ========================
     const CONFIG = {
-        FUSE_DURATION: 12,              // Seconds the bomb lasts
-        MIN_LOCKOUT: 0.5,               // Base dash cooldown (seconds)
-        CARRIER_LOCKOUT_BONUS: 0.3,     // Carrier cooldown bonus (seconds)
-        MAX_DRAG_RADIUS_RATIO: 0.2,     // Max drag distance (20% of arena)
-        PLAYER_FRICTION: 0.92,          // Velocity multiplier per frame for players
-        BOX_FRICTION: 0.85,             // Velocity multiplier for heavy boxes (lower = stops faster)
-        NEAR_ZERO_VELOCITY_THRESHOLD: 5,// Pixels per sec to allow next dash
-        BOX_SIZE_RATIO: 0.06,           // Box size (6% of arena)
-        PLAYER_RADIUS_RATIO: 0.025,     // Player radius (2.5% of arena)
-        ROUNDS_TO_WIN: 3,               // Score needed to win match
-        SYNC_RATE: 30,                  // Firebase syncs per second
-        MAX_DASH_SPEED: 1800            // Base multiplier for max drag
+      FUSE_DURATION: 12,
+      MIN_LOCKOUT: 0.5,
+      CARRIER_LOCKOUT_BONUS: 0.3,
+      MAX_DRAG_RADIUS_RATIO: 0.2,
+      PLAYER_FRICTION: 0.92,
+      BOX_FRICTION: 0.96,
+      NEAR_ZERO_VELOCITY_THRESHOLD: 5,
+      BOX_SIZE_RATIO: 0.06,
+      PLAYER_RADIUS_RATIO: 0.025,
+      ROUNDS_TO_WIN: 3,
+      SYNC_RATE: 30,
+      MAX_DASH_SPEED_MULTIPLIER: 1.25,
+      PLAYER_BOX_BRAKE: 0.42,
+      BOX_PUSH_MULTIPLIER: 0.48,
+      PLAYER_RESTITUTION: 0.72,
+      BOX_RESTITUTION: 0.25,
+      PASS_GRACE_SECONDS: 0.45,
+      COUNTDOWN_SECONDS: 3,
+      ROUND_END_DELAY: 2.25,
+      HOST_HEARTBEAT_MS: 1500,
+      HOST_STALE_MS: 5500,
+      INTERPOLATION: 0.28
     };
+    // ==============================================================================
 
-    // ==========================================
-    // FIREBASE INITIALIZATION
-    // ==========================================
-    // REPLACE WITH YOUR FIREBASE CONFIG
     const firebaseConfig = {
-        apiKey: "YOUR_API_KEY",
-        authDomain: "YOUR_AUTH_DOMAIN",
-        databaseURL: "YOUR_DATABASE_URL",
-        projectId: "YOUR_PROJECT_ID",
-        storageBucket: "YOUR_STORAGE_BUCKET",
-        messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-        appId: "YOUR_APP_ID"
+      apiKey: "AIzaSyBfOKGz06urUqutCnDUfy6P2hMswoBifq8",
+      authDomain: "bomb-game-782c2.firebaseapp.com",
+      databaseURL: "https://bomb-game-782c2-default-rtdb.asia-southeast1.firebasedatabase.app",
+      projectId: "bomb-game-782c2",
+      storageBucket: "bomb-game-782c2.firebasestorage.app",
+      messagingSenderId: "984947565972",
+      appId: "1:984947565972:web:486661db2f7dab317bdb81"
     };
-    
-    // Initialize standard Firebase logic to run immediately if valid config, else hold.
-    let app, auth, db;
-    try {
-        app = firebase.initializeApp(firebaseConfig);
-        auth = firebase.auth();
-        db = firebase.database();
-        auth.signInAnonymously();
-    } catch(e) {
-        console.warn("Firebase not configured. Add credentials to play online.");
-    }
 
-    // ==========================================
-    // GAME STATE & GLOBALS
-    // ==========================================
-    const canvas = document.getElementById('gameCanvas');
-    const ctx = canvas.getContext('2d');
-    
-    let myId = null;
-    let roomCode = null;
+    const USE_FIREBASE = !firebaseConfig.apiKey.includes("PASTE_");
+    const COLORS = ["#71d4ff", "#ffcc66", "#a98bff", "#80e18d"];
+    const SPAWNS = [
+      { x: 0.18, y: 0.18 },
+      { x: 0.82, y: 0.18 },
+      { x: 0.18, y: 0.82 },
+      { x: 0.82, y: 0.82 }
+    ];
+
+    const $ = (id) => document.getElementById(id);
+    const canvas = $("game");
+    const ctx = canvas.getContext("2d");
+    const overlay = $("overlay");
+    const overlayMsg = $("overlayMsg");
+    const roomCodeEl = $("roomCode");
+    const connDot = $("connDot");
+    const connText = $("connText");
+    const roleText = $("roleText");
+    const startBtn = $("startBtn");
+    const scoresEl = $("scores");
+    const roundText = $("roundText");
+    const tags = [$("tag0"), $("tag1"), $("tag2"), $("tag3")];
+
+    let app = null;
+    let auth = null;
+    let db = null;
+    let uid = "local-" + Math.random().toString(36).slice(2, 10);
+    let roomCode = "";
+    let roomRef = null;
+    let playerRef = null;
+    let stateRef = null;
+    let hostRef = null;
+    let presenceRef = null;
     let isHost = false;
-    let arenaSize = 0;
-    
-    // Local interpolation & state
-    let state = { phase: 'lobby', timer: 0, bomb: null, boxes: [], players: {} };
-    let scores = {};
-    let localInputs = { dragging: false, startX: 0, startY: 0, currentX: 0, currentY: 0, lastDashTime: 0 };
-    let playerColors = ['#3498db', '#2ecc71', '#9b59b6', '#f1c40f'];
+    let localIndex = 0;
+    let lastFrame = performance.now();
+    let lastSync = 0;
+    let lastHeartbeat = 0;
+    let lastPassAt = 0;
+    let drag = null;
+    let arenaSize = 800;
 
-    // Resize handling (Square arena)
-    function resize() {
-        let size = Math.min(window.innerWidth, window.innerHeight) * 0.9;
-        canvas.width = size;
-        canvas.height = size;
-        arenaSize = size;
-    }
-    window.addEventListener('resize', resize);
-    resize();
+    const game = emptyGame();
+    const renderState = emptyGame();
 
-    // ==========================================
-    // LOBBY & NETWORKING
-    // ==========================================
-    function createCode() { return Math.floor(1000 + Math.random() * 9000).toString(); }
-    
-    auth.onAuthStateChanged(user => { if(user) myId = user.uid; });
-
-    function createRoom() {
-        if(!myId) return alert("Connecting...");
-        roomCode = createCode();
-        isHost = true;
-        joinFirebaseRoom(roomCode);
+    function emptyGame() {
+      return {
+        phase: "idle",
+        round: 0,
+        message: "Waiting for players",
+        countdownEnd: 0,
+        fuseEnd: 0,
+        roundResumeAt: 0,
+        winnerId: "",
+        bombCarrierId: "",
+        players: {},
+        boxes: [],
+        scores: {}
+      };
     }
 
-    function joinRoom() {
-        if(!myId) return alert("Connecting...");
-        let code = document.getElementById('room-code').value.trim().toUpperCase();
-        if(code.length === 4) {
-            roomCode = code;
-            isHost = false;
-            joinFirebaseRoom(roomCode);
+    function nowMs() {
+      return Date.now();
+    }
+
+    function clamp(v, min, max) {
+      return Math.max(min, Math.min(max, v));
+    }
+
+    function hypot(x, y) {
+      return Math.hypot(x, y);
+    }
+
+    function speed(o) {
+      return hypot(o.vx || 0, o.vy || 0);
+    }
+
+    function copyInto(target, source) {
+      target.phase = source.phase || "idle";
+      target.round = source.round || 0;
+      target.message = source.message || "";
+      target.countdownEnd = source.countdownEnd || 0;
+      target.fuseEnd = source.fuseEnd || 0;
+      target.roundResumeAt = source.roundResumeAt || 0;
+      target.winnerId = source.winnerId || "";
+      target.bombCarrierId = source.bombCarrierId || "";
+      target.scores = source.scores || {};
+      target.boxes = Array.isArray(source.boxes) ? source.boxes.map(b => ({ ...b })) : [];
+      const nextPlayers = source.players || {};
+      for (const id of Object.keys(target.players)) {
+        if (!nextPlayers[id]) delete target.players[id];
+      }
+      for (const [id, p] of Object.entries(nextPlayers)) {
+        target.players[id] = { ...(target.players[id] || {}), ...p };
+      }
+    }
+
+    function resizeCanvas() {
+      const rect = canvas.getBoundingClientRect();
+      const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
+      canvas.width = Math.max(1, Math.floor(rect.width * dpr));
+      canvas.height = Math.max(1, Math.floor(rect.height * dpr));
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      arenaSize = rect.width;
+    }
+
+    function roomPath(code) {
+      return "/rooms/" + code;
+    }
+
+    async function initFirebase() {
+      if (!USE_FIREBASE) {
+        setConnection(false, "Config needed");
+        overlayMsg.textContent = "Paste your Firebase config into the HTML before using online rooms.";
+        return false;
+      }
+      app = firebase.initializeApp(firebaseConfig);
+      auth = firebase.auth();
+      db = firebase.database();
+      await auth.signInAnonymously();
+      uid = auth.currentUser.uid;
+      firebase.database().ref(".info/connected").on("value", (snap) => {
+        setConnection(!!snap.val(), snap.val() ? "Connected" : "Reconnecting");
+      });
+      return true;
+    }
+
+    function setConnection(ok, text) {
+      connDot.classList.toggle("ok", ok);
+      connText.textContent = text;
+    }
+
+    function getPlayerName() {
+      return ($("nameInput").value || "Player").trim().slice(0, 14) || "Player";
+    }
+
+    function makeCode() {
+      return String(Math.floor(1000 + Math.random() * 9000));
+    }
+
+    async function createRoom() {
+      if (!await initFirebase()) return;
+      roomCode = makeCode();
+      roomRef = db.ref(roomPath(roomCode));
+      const initial = emptyGame();
+      initial.createdAt = firebase.database.ServerValue.TIMESTAMP;
+      initial.hostId = uid;
+      initial.players = {};
+      await roomRef.set(initial);
+      await joinExistingRoom(roomCode, true);
+    }
+
+    async function joinExistingRoom(code, host) {
+      if (!db && !await initFirebase()) return;
+      roomCode = String(code).replace(/\D/g, "").slice(0, 4);
+      if (roomCode.length !== 4) {
+        overlayMsg.textContent = "Enter a 4-digit room code.";
+        return;
+      }
+      roomRef = db.ref(roomPath(roomCode));
+      stateRef = roomRef;
+      hostRef = roomRef.child("hostId");
+      playerRef = roomRef.child("players").child(uid);
+      presenceRef = playerRef.child("connected");
+      const snap = await roomRef.get();
+      if (!snap.exists() && !host) {
+        overlayMsg.textContent = "Room not found.";
+        return;
+      }
+      const players = snap.child("players").val() || {};
+      const used = Object.values(players).map(p => p.index);
+      const index = [0, 1, 2, 3].find(i => !used.includes(i));
+      if (index === undefined) {
+        overlayMsg.textContent = "Room is full.";
+        return;
+      }
+      localIndex = index;
+      await playerRef.set({
+        name: getPlayerName(),
+        index,
+        color: COLORS[index],
+        connected: true,
+        ready: true,
+        joinedAt: firebase.database.ServerValue.TIMESTAMP,
+        active: true,
+        ghost: false,
+        x: SPAWNS[index].x,
+        y: SPAWNS[index].y,
+        vx: 0,
+        vy: 0,
+        lastDashAt: 0
+      });
+      playerRef.onDisconnect().remove();
+      roomRef.on("value", handleRoomUpdate);
+      overlay.style.display = "none";
+      roomCodeEl.textContent = roomCode;
+      setConnection(true, "Connected");
+    }
+
+    function handleRoomUpdate(snap) {
+      const data = snap.val();
+      if (!data) return;
+      copyInto(game, data);
+      const players = game.players || {};
+      const hostId = data.hostId || pickHostId(players);
+      isHost = hostId === uid;
+      if (!data.hostId && hostId && db) hostRef.set(hostId);
+      const hostPlayer = players[hostId];
+      if (!isHost && (!hostPlayer || !hostPlayer.connected || nowMs() - (data.hostHeartbeat || 0) > CONFIG.HOST_STALE_MS)) {
+        const nextHost = pickHostId(players);
+        if (nextHost === uid) hostRef.set(uid);
+      }
+      roleText.textContent = isHost ? "Host" : "Client";
+      startBtn.disabled = !isHost || activeConnectedPlayers().length < 2 || game.phase === "countdown" || game.phase === "playing";
+      updateHud();
+    }
+
+    function pickHostId(players) {
+      return Object.entries(players || {})
+        .filter(([, p]) => p.connected)
+        .sort((a, b) => (a[1].joinedAt || 0) - (b[1].joinedAt || 0))[0]?.[0] || "";
+    }
+
+    function activeConnectedPlayers() {
+      return Object.entries(game.players || {}).filter(([, p]) => p.connected);
+    }
+
+    function startMatchOrRound() {
+      if (!isHost) return;
+      const currentScores = game.scores || {};
+      startRound(game.round + 1, currentScores);
+    }
+
+    function startRound(round, scores) {
+      const ids = activeConnectedPlayers().slice(0, 4).map(([id]) => id);
+      if (ids.length < 2) return;
+      const players = {};
+      ids.forEach((id, i) => {
+        const base = game.players[id] || {};
+        players[id] = {
+          ...base,
+          index: base.index ?? i,
+          color: base.color || COLORS[i],
+          active: true,
+          ghost: false,
+          x: SPAWNS[i].x,
+          y: SPAWNS[i].y,
+          vx: 0,
+          vy: 0,
+          lastDashAt: 0
+        };
+      });
+      const bombCarrierId = ids[Math.floor(Math.random() * ids.length)];
+      const next = {
+        phase: "countdown",
+        message: "Get ready",
+        round,
+        countdownEnd: nowMs() + CONFIG.COUNTDOWN_SECONDS * 1000,
+        fuseEnd: 0,
+        roundResumeAt: 0,
+        winnerId: "",
+        bombCarrierId,
+        players,
+        boxes: createBoxes(),
+        scores,
+        hostId: uid,
+        hostHeartbeat: nowMs()
+      };
+      roomRef.update(next);
+    }
+
+    function createBoxes() {
+      const s = CONFIG.BOX_SIZE_RATIO;
+      const gap = s * 1.16;
+      const pad = s * 1.3;
+      const points = [
+        [pad, pad], [pad + gap, pad],
+        [pad, pad + gap],
+        [pad, 1 - pad - s],
+        [pad, 1 - pad - s - gap], [pad + gap, 1 - pad - s],
+        [1 - pad - s, pad], [1 - pad - s - gap, pad],
+        [1 - pad - s, pad + gap],
+        [1 - pad - s, 1 - pad - s],
+        [1 - pad - s - gap, 1 - pad - s],
+        [1 - pad - s, 1 - pad - s - gap]
+      ];
+      return points.map(([x, y], i) => ({ id: i, x, y, vx: 0, vy: 0 }));
+    }
+
+    function hostStep(dt) {
+      if (!isHost) return;
+      const t = nowMs();
+      if (t - lastHeartbeat > CONFIG.HOST_HEARTBEAT_MS) {
+        lastHeartbeat = t;
+        roomRef.update({ hostHeartbeat: t, hostId: uid });
+      }
+
+      if (game.phase === "countdown" && t >= game.countdownEnd) {
+        game.phase = "playing";
+        game.fuseEnd = t + CONFIG.FUSE_DURATION * 1000;
+        game.message = "Run";
+      }
+
+      if (game.phase === "playing") {
+        simulate(dt);
+        if (t >= game.fuseEnd) explodeCarrier();
+        const alive = Object.entries(game.players).filter(([, p]) => p.active && !p.ghost);
+        if (alive.length <= 1) {
+          const winnerId = alive[0]?.[0] || "";
+          game.phase = "roundEnd";
+          game.winnerId = winnerId;
+          game.roundResumeAt = t + CONFIG.ROUND_END_DELAY * 1000;
+          game.message = winnerId ? ((game.players[winnerId]?.name || "Player") + " wins the round") : "No winner";
+          if (winnerId) game.scores[winnerId] = (game.scores[winnerId] || 0) + 1;
         }
-    }
+      }
 
-    function joinFirebaseRoom(code) {
-        const roomRef = db.ref('rooms/' + code);
-        roomRef.child('players/' + myId).set({ x: arenaSize/2, y: arenaSize/2, color: playerColors[Math.floor(Math.random()*4)], ready: true });
-        roomRef.child('players/' + myId).onDisconnect().remove();
-
-        document.getElementById('lobby').style.display = 'none';
-        document.getElementById('game-container').style.display = 'flex';
-        document.getElementById('room-display').innerText = `Room: ${code}`;
-
-        if(isHost) {
-            setupInitialState();
-            setInterval(hostPhysicsLoop, 1000 / CONFIG.SYNC_RATE);
+      if (game.phase === "roundEnd" && t >= game.roundResumeAt) {
+        const matchWinner = Object.entries(game.scores || {}).find(([, score]) => score >= CONFIG.ROUNDS_TO_WIN)?.[0];
+        if (matchWinner) {
+          game.phase = "matchEnd";
+          game.winnerId = matchWinner;
+          game.message = (game.players[matchWinner]?.name || "Player") + " wins the match";
+        } else {
+          startRound(game.round + 1, game.scores || {});
+          return;
         }
+      }
 
-        // Listen for sync
-        roomRef.child('state').on('value', snap => {
-            if(snap.exists()) state = snap.val();
-            updateUI();
-        });
-        
-        roomRef.child('scores').on('value', snap => {
-            if(snap.exists()) scores = snap.val();
-            updateUI();
-        });
+      if (t - lastSync >= 1000 / CONFIG.SYNC_RATE) {
+        lastSync = t;
+        syncHostState();
+      }
+    }
 
-        // Listen for dash intents from clients (Host only)
-        if(isHost) {
-            roomRef.child('intents').on('child_added', snap => {
-                let intent = snap.val();
-                let p = state.players[intent.id];
-                if(p && p.alive) {
-                    p.vx = intent.vx;
-                    p.vy = intent.vy;
-                }
-                snap.ref.remove();
-            });
+    function simulate(dt) {
+      const players = Object.entries(game.players);
+      const boxes = game.boxes || [];
+      const pr = CONFIG.PLAYER_RADIUS_RATIO;
+      const bs = CONFIG.BOX_SIZE_RATIO;
+
+      for (const [, p] of players) {
+        if (!p.active || p.ghost) continue;
+        p.x += (p.vx || 0) * dt;
+        p.y += (p.vy || 0) * dt;
+        p.vx = (p.vx || 0) * Math.pow(CONFIG.PLAYER_FRICTION, dt * 60);
+        p.vy = (p.vy || 0) * Math.pow(CONFIG.PLAYER_FRICTION, dt * 60);
+        bounceCircleWalls(p, pr);
+      }
+
+      for (const b of boxes) {
+        b.x += (b.vx || 0) * dt;
+        b.y += (b.vy || 0) * dt;
+        b.vx = (b.vx || 0) * Math.pow(CONFIG.BOX_FRICTION, dt * 60);
+        b.vy = (b.vy || 0) * Math.pow(CONFIG.BOX_FRICTION, dt * 60);
+        bounceBoxWalls(b, bs);
+      }
+
+      for (const [, p] of players) {
+        if (!p.active || p.ghost) continue;
+        for (const b of boxes) collideCircleBox(p, b, pr, bs);
+      }
+
+      for (let i = 0; i < boxes.length; i++) {
+        for (let j = i + 1; j < boxes.length; j++) collideBoxes(boxes[i], boxes[j], bs);
+      }
+
+      for (let i = 0; i < players.length; i++) {
+        const [idA, a] = players[i];
+        if (!a.active || a.ghost) continue;
+        for (let j = i + 1; j < players.length; j++) {
+          const [idB, b] = players[j];
+          if (!b.active || b.ghost) continue;
+          collidePlayers(idA, a, idB, b, pr);
         }
-        
-        requestAnimationFrame(render);
+      }
     }
 
-    function setupInitialState() {
-        state = { phase: 'waiting', timer: 0, bomb: null, boxes: [], players: {} };
-        db.ref('rooms/'+roomCode+'/scores').set({});
-        resetRound(true);
+    function bounceCircleWalls(p, r) {
+      if (p.x < r) { p.x = r; p.vx = Math.abs(p.vx || 0) * CONFIG.PLAYER_RESTITUTION; }
+      if (p.x > 1 - r) { p.x = 1 - r; p.vx = -Math.abs(p.vx || 0) * CONFIG.PLAYER_RESTITUTION; }
+      if (p.y < r) { p.y = r; p.vy = Math.abs(p.vy || 0) * CONFIG.PLAYER_RESTITUTION; }
+      if (p.y > 1 - r) { p.y = 1 - r; p.vy = -Math.abs(p.vy || 0) * CONFIG.PLAYER_RESTITUTION; }
     }
 
-    function resetRound(fullReset = false) {
-        let boxSize = arenaSize * CONFIG.BOX_SIZE_RATIO;
-        let margin = boxSize * 1.5;
-        let bPositions = [
-            // Top Left
-            {x: margin, y: margin}, {x: margin + boxSize, y: margin}, {x: margin, y: margin + boxSize},
-            // Top Right
-            {x: arenaSize-margin, y: margin}, {x: arenaSize-margin-boxSize, y: margin}, {x: arenaSize-margin, y: margin+boxSize},
-            // Bottom Left
-            {x: margin, y: arenaSize-margin}, {x: margin+boxSize, y: arenaSize-margin}, {x: margin, y: arenaSize-margin-boxSize},
-            // Bottom Right
-            {x: arenaSize-margin, y: arenaSize-margin}, {x: arenaSize-margin-boxSize, y: arenaSize-margin}, {x: arenaSize-margin, y: arenaSize-margin-boxSize}
-        ];
-        
-        state.boxes = bPositions.map(p => ({ x: p.x, y: p.y, vx: 0, vy: 0 }));
-        
-        db.ref('rooms/'+roomCode+'/players').once('value', snap => {
-            let pData = snap.val() || {};
-            let ids = Object.keys(pData);
-            if(ids.length < 2 && !fullReset) { state.phase = 'waiting'; return; }
-            
-            ids.forEach((id, i) => {
-                state.players[id] = { 
-                    x: arenaSize/2 + Math.cos(i)*100, y: arenaSize/2 + Math.sin(i)*100, 
-                    vx: 0, vy: 0, alive: true, color: pData[id].color 
-                };
-                if(fullReset) db.ref(`rooms/${roomCode}/scores/${id}`).set(0);
-            });
-
-            state.bomb = ids[Math.floor(Math.random() * ids.length)];
-            state.phase = 'countdown';
-            state.timer = 3;
-            db.ref('rooms/'+roomCode+'/state').set(state);
-
-            let count = 3;
-            let iv = setInterval(() => {
-                count--;
-                state.timer = count;
-                if(count <= 0) {
-                    clearInterval(iv);
-                    state.phase = 'playing';
-                    state.timer = CONFIG.FUSE_DURATION;
-                    db.ref('rooms/'+roomCode+'/state').set(state);
-                }
-            }, 1000);
-        });
+    function bounceBoxWalls(b, s) {
+      if (b.x < 0) { b.x = 0; b.vx = Math.abs(b.vx || 0) * CONFIG.BOX_RESTITUTION; }
+      if (b.x > 1 - s) { b.x = 1 - s; b.vx = -Math.abs(b.vx || 0) * CONFIG.BOX_RESTITUTION; }
+      if (b.y < 0) { b.y = 0; b.vy = Math.abs(b.vy || 0) * CONFIG.BOX_RESTITUTION; }
+      if (b.y > 1 - s) { b.y = 1 - s; b.vy = -Math.abs(b.vy || 0) * CONFIG.BOX_RESTITUTION; }
     }
 
-    // ==========================================
-    // INPUT HANDLING (Slingshot)
-    // ==========================================
-    function handleStart(x, y) {
-        if(state.phase !== 'playing' || !state.players[myId]?.alive) return;
-        localInputs.dragging = true;
-        localInputs.startX = x;
-        localInputs.startY = y;
-        localInputs.currentX = x;
-        localInputs.currentY = y;
+    function collideCircleBox(p, b, r, s) {
+      const cx = clamp(p.x, b.x, b.x + s);
+      const cy = clamp(p.y, b.y, b.y + s);
+      let dx = p.x - cx;
+      let dy = p.y - cy;
+      let d = hypot(dx, dy);
+      if (d >= r) return;
+      if (d < 0.0001) {
+        dx = p.x < b.x + s / 2 ? -1 : 1;
+        dy = 0;
+        d = 1;
+      }
+      const nx = dx / d;
+      const ny = dy / d;
+      const overlap = r - d;
+      p.x += nx * overlap;
+      p.y += ny * overlap;
+      const push = Math.max(0, (p.vx || 0) * nx + (p.vy || 0) * ny);
+      b.vx = (b.vx || 0) + nx * push * CONFIG.BOX_PUSH_MULTIPLIER;
+      b.vy = (b.vy || 0) + ny * push * CONFIG.BOX_PUSH_MULTIPLIER;
+      p.vx = (p.vx || 0) * CONFIG.PLAYER_BOX_BRAKE;
+      p.vy = (p.vy || 0) * CONFIG.PLAYER_BOX_BRAKE;
     }
-    
-    function handleMove(x, y) {
-        if(localInputs.dragging) {
-            localInputs.currentX = x;
-            localInputs.currentY = y;
+
+    function collideBoxes(a, b, s) {
+      if (a.x + s <= b.x || b.x + s <= a.x || a.y + s <= b.y || b.y + s <= a.y) return;
+      const ax = a.x + s / 2;
+      const ay = a.y + s / 2;
+      const bx = b.x + s / 2;
+      const by = b.y + s / 2;
+      const ox = s - Math.abs(ax - bx);
+      const oy = s - Math.abs(ay - by);
+      if (ox < oy) {
+        const dir = ax < bx ? -1 : 1;
+        a.x += dir * ox / 2;
+        b.x -= dir * ox / 2;
+        const av = a.vx || 0;
+        a.vx = (b.vx || 0) * CONFIG.BOX_RESTITUTION;
+        b.vx = av * CONFIG.BOX_RESTITUTION;
+      } else {
+        const dir = ay < by ? -1 : 1;
+        a.y += dir * oy / 2;
+        b.y -= dir * oy / 2;
+        const av = a.vy || 0;
+        a.vy = (b.vy || 0) * CONFIG.BOX_RESTITUTION;
+        b.vy = av * CONFIG.BOX_RESTITUTION;
+      }
+      bounceBoxWalls(a, s);
+      bounceBoxWalls(b, s);
+    }
+
+    function collidePlayers(idA, a, idB, b, r) {
+      let dx = b.x - a.x;
+      let dy = b.y - a.y;
+      let d = hypot(dx, dy);
+      if (d >= r * 2) return;
+      if (d < 0.0001) {
+        dx = 1; dy = 0; d = 1;
+      }
+      const nx = dx / d;
+      const ny = dy / d;
+      const overlap = r * 2 - d;
+      a.x -= nx * overlap / 2;
+      a.y -= ny * overlap / 2;
+      b.x += nx * overlap / 2;
+      b.y += ny * overlap / 2;
+      const avn = (a.vx || 0) * nx + (a.vy || 0) * ny;
+      const bvn = (b.vx || 0) * nx + (b.vy || 0) * ny;
+      const impulse = (avn - bvn) * CONFIG.PLAYER_RESTITUTION;
+      a.vx = (a.vx || 0) - impulse * nx;
+      a.vy = (a.vy || 0) - impulse * ny;
+      b.vx = (b.vx || 0) + impulse * nx;
+      b.vy = (b.vy || 0) + impulse * ny;
+      if (game.phase === "playing" && nowMs() - lastPassAt > CONFIG.PASS_GRACE_SECONDS * 1000) {
+        if (game.bombCarrierId === idA) { game.bombCarrierId = idB; lastPassAt = nowMs(); }
+        else if (game.bombCarrierId === idB) { game.bombCarrierId = idA; lastPassAt = nowMs(); }
+      }
+    }
+
+    function explodeCarrier() {
+      const id = game.bombCarrierId;
+      if (game.players[id]) {
+        game.players[id].active = false;
+        game.players[id].ghost = true;
+        game.players[id].vx = 0;
+        game.players[id].vy = 0;
+      }
+      const alive = Object.entries(game.players).filter(([, p]) => p.active && !p.ghost);
+      game.bombCarrierId = alive[Math.floor(Math.random() * alive.length)]?.[0] || "";
+      game.fuseEnd = nowMs() + CONFIG.FUSE_DURATION * 1000;
+      lastPassAt = nowMs();
+    }
+
+    function syncHostState() {
+      if (!roomRef) return;
+      const slimPlayers = {};
+      for (const [id, p] of Object.entries(game.players || {})) {
+        slimPlayers[id] = {
+          name: p.name,
+          index: p.index,
+          color: p.color,
+          connected: p.connected !== false,
+          joinedAt: p.joinedAt || 0,
+          ready: p.ready !== false,
+          active: p.active !== false,
+          ghost: !!p.ghost,
+          x: +p.x.toFixed(5),
+          y: +p.y.toFixed(5),
+          vx: +(p.vx || 0).toFixed(5),
+          vy: +(p.vy || 0).toFixed(5),
+          lastDashAt: p.lastDashAt || 0
+        };
+      }
+      roomRef.update({
+        phase: game.phase,
+        round: game.round,
+        message: game.message,
+        countdownEnd: game.countdownEnd,
+        fuseEnd: game.fuseEnd,
+        roundResumeAt: game.roundResumeAt,
+        winnerId: game.winnerId,
+        bombCarrierId: game.bombCarrierId,
+        scores: game.scores || {},
+        boxes: (game.boxes || []).map(b => ({
+          id: b.id,
+          x: +b.x.toFixed(5),
+          y: +b.y.toFixed(5),
+          vx: +(b.vx || 0).toFixed(5),
+          vy: +(b.vy || 0).toFixed(5)
+        })),
+        players: slimPlayers
+      });
+    }
+
+    function tryDash() {
+      if (!drag || !roomCode) return;
+      const p = game.players[uid];
+      if (!p || !p.active || p.ghost || game.phase !== "playing") return;
+      const minLockout = game.bombCarrierId === uid ? CONFIG.CARRIER_LOCKOUT_BONUS : CONFIG.MIN_LOCKOUT;
+      const elapsed = (nowMs() - (p.lastDashAt || 0)) / 1000;
+      if (elapsed < minLockout || speed(p) * arenaSize > CONFIG.NEAR_ZERO_VELOCITY_THRESHOLD) return;
+
+      const maxDrag = arenaSize * CONFIG.MAX_DRAG_RADIUS_RATIO;
+      const dx = clamp(drag.currentX - drag.startX, -maxDrag, maxDrag);
+      const dy = clamp(drag.currentY - drag.startY, -maxDrag, maxDrag);
+      const dist = Math.min(maxDrag, hypot(dx, dy));
+      if (dist < 4) return;
+      const power = dist / maxDrag;
+      const maxSpeed = CONFIG.MAX_DASH_SPEED_MULTIPLIER * (1 - CONFIG.PLAYER_FRICTION) * 60;
+      p.vx = (-dx / Math.max(dist, 1)) * maxSpeed * power;
+      p.vy = (-dy / Math.max(dist, 1)) * maxSpeed * power;
+      p.lastDashAt = nowMs();
+      if (isHost) syncHostState();
+      else playerRef.update({ vx: p.vx, vy: p.vy, lastDashAt: p.lastDashAt });
+    }
+
+    function canvasPoint(evt) {
+      const rect = canvas.getBoundingClientRect();
+      const source = evt.touches?.[0] || evt.changedTouches?.[0] || evt;
+      return {
+        x: source.clientX - rect.left,
+        y: source.clientY - rect.top
+      };
+    }
+
+    function onPointerStart(evt) {
+      evt.preventDefault();
+      const pt = canvasPoint(evt);
+      drag = { startX: pt.x, startY: pt.y, currentX: pt.x, currentY: pt.y };
+    }
+
+    function onPointerMove(evt) {
+      if (!drag) return;
+      evt.preventDefault();
+      const pt = canvasPoint(evt);
+      drag.currentX = pt.x;
+      drag.currentY = pt.y;
+    }
+
+    function onPointerEnd(evt) {
+      if (!drag) return;
+      evt.preventDefault();
+      if (evt.changedTouches?.[0]) {
+        const pt = canvasPoint(evt);
+        drag.currentX = pt.x;
+        drag.currentY = pt.y;
+      }
+      tryDash();
+      drag = null;
+    }
+
+    function render(dt) {
+      const source = game;
+      if (isHost) copyInto(renderState, source);
+      else interpolateState(renderState, source);
+      draw();
+      updateRoundText();
+      updateCornerTags();
+    }
+
+    function interpolateState(target, source) {
+      target.phase = source.phase;
+      target.round = source.round;
+      target.message = source.message;
+      target.countdownEnd = source.countdownEnd;
+      target.fuseEnd = source.fuseEnd;
+      target.roundResumeAt = source.roundResumeAt;
+      target.winnerId = source.winnerId;
+      target.bombCarrierId = source.bombCarrierId;
+      target.scores = source.scores || {};
+      for (const [id, p] of Object.entries(source.players || {})) {
+        if (!target.players[id]) target.players[id] = { ...p };
+        const rp = target.players[id];
+        rp.x = rp.x + ((p.x || 0) - (rp.x || 0)) * CONFIG.INTERPOLATION;
+        rp.y = rp.y + ((p.y || 0) - (rp.y || 0)) * CONFIG.INTERPOLATION;
+        Object.assign(rp, { ...p, x: rp.x, y: rp.y });
+      }
+      for (const id of Object.keys(target.players)) if (!source.players?.[id]) delete target.players[id];
+      target.boxes = (source.boxes || []).map((b, i) => {
+        const prev = target.boxes[i] || b;
+        return { ...b, x: prev.x + (b.x - prev.x) * CONFIG.INTERPOLATION, y: prev.y + (b.y - prev.y) * CONFIG.INTERPOLATION };
+      });
+    }
+
+    function draw() {
+      const w = arenaSize;
+      ctx.clearRect(0, 0, w, w);
+      drawFloor(w);
+      const bs = CONFIG.BOX_SIZE_RATIO * w;
+      const pr = CONFIG.PLAYER_RADIUS_RATIO * w;
+
+      for (const b of renderState.boxes || []) {
+        ctx.fillStyle = "#6d7380";
+        ctx.strokeStyle = "#171b22";
+        ctx.lineWidth = Math.max(2, w * 0.004);
+        ctx.fillRect(b.x * w, b.y * w, bs, bs);
+        ctx.strokeRect(b.x * w, b.y * w, bs, bs);
+      }
+
+      for (const [id, p] of Object.entries(renderState.players || {})) {
+        const x = p.x * w;
+        const y = p.y * w;
+        ctx.globalAlpha = p.ghost ? 0.32 : 1;
+        ctx.beginPath();
+        ctx.arc(x, y, pr, 0, Math.PI * 2);
+        ctx.fillStyle = p.color || "#ffffff";
+        ctx.fill();
+        ctx.lineWidth = Math.max(2, w * 0.004);
+        ctx.strokeStyle = id === uid ? "#ffffff" : "#111318";
+        ctx.stroke();
+        if (renderState.bombCarrierId === id && !p.ghost) {
+          ctx.beginPath();
+          ctx.arc(x, y, pr * 1.55, 0, Math.PI * 2);
+          ctx.strokeStyle = "#ff6377";
+          ctx.lineWidth = Math.max(3, w * 0.006);
+          ctx.stroke();
         }
+        ctx.globalAlpha = 1;
+      }
+
+      drawCenterTimer(w);
+      drawDrag(w);
     }
 
-    function handleEnd() {
-        if(!localInputs.dragging) return;
-        localInputs.dragging = false;
-        
-        let p = state.players[myId];
-        if(!p) return;
-        
-        let speed = Math.hypot(p.vx, p.vy);
-        let lockout = CONFIG.MIN_LOCKOUT - (state.bomb === myId ? CONFIG.CARRIER_LOCKOUT_BONUS : 0);
-        let timeSinceDash = (Date.now() - localInputs.lastDashTime) / 1000;
-        
-        if(timeSinceDash >= lockout && speed < CONFIG.NEAR_ZERO_VELOCITY_THRESHOLD) {
-            let dx = localInputs.startX - localInputs.currentX;
-            let dy = localInputs.startY - localInputs.currentY;
-            let dist = Math.hypot(dx, dy);
-            
-            if(dist > 0) {
-                let maxDrag = arenaSize * CONFIG.MAX_DRAG_RADIUS_RATIO;
-                let power = Math.min(dist, maxDrag) / maxDrag; 
-                
-                let dashVx = (dx / dist) * power * CONFIG.MAX_DASH_SPEED;
-                let dashVy = (dy / dist) * power * CONFIG.MAX_DASH_SPEED;
-                
-                localInputs.lastDashTime = Date.now();
-                
-                // Send intent to Host via DB
-                db.ref(`rooms/${roomCode}/intents`).push({ id: myId, vx: dashVx, vy: dashVy });
-            }
+    function drawFloor(w) {
+      const cells = 16;
+      const s = w / cells;
+      for (let y = 0; y < cells; y++) {
+        for (let x = 0; x < cells; x++) {
+          ctx.fillStyle = (x + y) % 2 ? "#1a2029" : "#202734";
+          ctx.fillRect(x * s, y * s, s, s);
         }
+      }
+      ctx.strokeStyle = "rgba(255,255,255,0.12)";
+      ctx.lineWidth = 1;
+      for (let i = 0; i <= cells; i++) {
+        ctx.beginPath();
+        ctx.moveTo(i * s, 0);
+        ctx.lineTo(i * s, w);
+        ctx.moveTo(0, i * s);
+        ctx.lineTo(w, i * s);
+        ctx.stroke();
+      }
     }
 
-    canvas.addEventListener('mousedown', e => handleStart(e.offsetX, e.offsetY));
-    canvas.addEventListener('mousemove', e => handleMove(e.offsetX, e.offsetY));
-    window.addEventListener('mouseup', handleEnd);
-    canvas.addEventListener('touchstart', e => { e.preventDefault(); let r = canvas.getBoundingClientRect(); handleStart(e.touches[0].clientX - r.left, e.touches[0].clientY - r.top); }, {passive: false});
-    canvas.addEventListener('touchmove', e => { e.preventDefault(); let r = canvas.getBoundingClientRect(); handleMove(e.touches[0].clientX - r.left, e.touches[0].clientY - r.top); }, {passive: false});
-    window.addEventListener('touchend', handleEnd);
-
-    // ==========================================
-    // PHYSICS (HOST ONLY)
-    // ==========================================
-    let lastTime = Date.now();
-    function hostPhysicsLoop() {
-        if(state.phase !== 'playing') return;
-        
-        let now = Date.now();
-        let dt = (now - lastTime) / 1000;
-        lastTime = now;
-        
-        let pRad = arenaSize * CONFIG.PLAYER_RADIUS_RATIO;
-        let bSize = arenaSize * CONFIG.BOX_SIZE_RATIO;
-        
-        // Bomb Timer
-        state.timer -= dt;
-        if(state.timer <= 0) {
-            state.timer = 0;
-            state.players[state.bomb].alive = false;
-            checkRoundEnd();
-        }
-
-        // Apply friction and move players
-        Object.keys(state.players).forEach(id => {
-            let p = state.players[id];
-            if(!p.alive) return;
-            p.vx *= CONFIG.PLAYER_FRICTION;
-            p.vy *= CONFIG.PLAYER_FRICTION;
-            p.x += p.vx * dt;
-            p.y += p.vy * dt;
-            
-            // Wall collisions
-            if(p.x < pRad) { p.x = pRad; p.vx *= -0.5; }
-            if(p.x > arenaSize - pRad) { p.x = arenaSize - pRad; p.vx *= -0.5; }
-            if(p.y < pRad) { p.y = pRad; p.vy *= -0.5; }
-            if(p.y > arenaSize - pRad) { p.y = arenaSize - pRad; p.vy *= -0.5; }
-        });
-
-        // Box Physics
-        state.boxes.forEach(b => {
-            b.vx *= CONFIG.BOX_FRICTION;
-            b.vy *= CONFIG.BOX_FRICTION;
-            b.x += b.vx * dt;
-            b.y += b.vy * dt;
-            
-            let half = bSize/2;
-            if(b.x < half) { b.x = half; b.vx *= -0.5; }
-            if(b.x > arenaSize - half) { b.x = arenaSize - half; b.vx *= -0.5; }
-            if(b.y < half) { b.y = half; b.vy *= -0.5; }
-            if(b.y > arenaSize - half) { b.y = arenaSize - half; b.vy *= -0.5; }
-        });
-
-        // Collisions: Player vs Box (Circle vs AABB)
-        Object.keys(state.players).forEach(id => {
-            let p = state.players[id];
-            if(!p.alive) return;
-            state.boxes.forEach(b => {
-                let testX = Math.max(b.x - bSize/2, Math.min(p.x, b.x + bSize/2));
-                let testY = Math.max(b.y - bSize/2, Math.min(p.y, b.y + bSize/2));
-                let distX = p.x - testX;
-                let distY = p.y - testY;
-                let distance = Math.hypot(distX, distY);
-
-                if(distance < pRad) {
-                    let overlap = pRad - distance;
-                    let nx = distX / distance;
-                    let ny = distY / distance;
-                    
-                    p.x += nx * overlap;
-                    p.y += ny * overlap;
-                    
-                    // Transfer momentum heavily to box, stop player
-                    b.vx -= nx * Math.hypot(p.vx, p.vy) * 0.8;
-                    b.vy -= ny * Math.hypot(p.vx, p.vy) * 0.8;
-                    p.vx *= 0.2;
-                    p.vy *= 0.2;
-                }
-            });
-        });
-
-        // Collisions: Player vs Player (Bomb transfer)
-        let ids = Object.keys(state.players);
-        for(let i=0; i<ids.length; i++) {
-            for(let j=i+1; j<ids.length; j++) {
-                let p1 = state.players[ids[i]];
-                let p2 = state.players[ids[j]];
-                if(!p1.alive || !p2.alive) continue;
-                
-                let dx = p1.x - p2.x;
-                let dy = p1.y - p2.y;
-                let dist = Math.hypot(dx, dy);
-                if(dist < pRad * 2) {
-                    // Resolve overlap
-                    let overlap = (pRad * 2) - dist;
-                    p1.x += (dx/dist) * (overlap/2);
-                    p1.y += (dy/dist) * (overlap/2);
-                    p2.x -= (dx/dist) * (overlap/2);
-                    p2.y -= (dy/dist) * (overlap/2);
-                    
-                    // Swap bomb
-                    if(state.bomb === ids[i]) state.bomb = ids[j];
-                    else if(state.bomb === ids[j]) state.bomb = ids[i];
-                }
-            }
-        }
-        
-        // Sync State
-        db.ref('rooms/'+roomCode+'/state').set(state);
+    function drawCenterTimer(w) {
+      let text = "";
+      if (renderState.phase === "countdown") text = String(Math.max(0, Math.ceil((renderState.countdownEnd - nowMs()) / 1000)));
+      if (renderState.phase === "playing") text = String(Math.max(0, Math.ceil((renderState.fuseEnd - nowMs()) / 1000)));
+      if (!text) return;
+      ctx.save();
+      ctx.globalAlpha = 0.5;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.font = "800 " + Math.floor(w * 0.22) + "px system-ui, sans-serif";
+      ctx.fillStyle = renderState.phase === "playing" ? "#ff6377" : "#f4f7fb";
+      ctx.fillText(text, w / 2, w / 2);
+      ctx.restore();
     }
 
-    function checkRoundEnd() {
-        let aliveIds = Object.keys(state.players).filter(id => state.players[id].alive);
-        if(aliveIds.length <= 1) {
-            state.phase = 'round_over';
-            let winnerId = aliveIds[0];
-            if(winnerId) {
-                scores[winnerId] = (scores[winnerId] || 0) + 1;
-                db.ref('rooms/'+roomCode+'/scores').set(scores);
-                if(scores[winnerId] >= CONFIG.ROUNDS_TO_WIN) {
-                    state.phase = 'match_over';
-                    db.ref('rooms/'+roomCode+'/state').set(state);
-                    return;
-                }
-            }
-            db.ref('rooms/'+roomCode+'/state').set(state);
-            setTimeout(() => resetRound(false), 3000);
-        }
+    function drawDrag(w) {
+      if (!drag) return;
+      const maxDrag = w * CONFIG.MAX_DRAG_RADIUS_RATIO;
+      const dx = drag.currentX - drag.startX;
+      const dy = drag.currentY - drag.startY;
+      const d = Math.min(maxDrag, hypot(dx, dy));
+      if (d <= 1) return;
+      const nx = dx / hypot(dx, dy);
+      const ny = dy / hypot(dx, dy);
+      const cx = drag.startX + nx * d;
+      const cy = drag.startY + ny * d;
+      ctx.save();
+      ctx.strokeStyle = "#71d4ff";
+      ctx.fillStyle = "#71d4ff";
+      ctx.lineWidth = Math.max(2, w * 0.005);
+      ctx.globalAlpha = 0.9;
+      ctx.beginPath();
+      ctx.arc(drag.startX, drag.startY, maxDrag, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(drag.startX, drag.startY);
+      ctx.lineTo(cx, cy);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(drag.startX, drag.startY);
+      ctx.lineTo(drag.startX - nx * d, drag.startY - ny * d);
+      ctx.strokeStyle = "#80e18d";
+      ctx.stroke();
+      ctx.restore();
     }
 
-    // ==========================================
-    // RENDER (ALL CLIENTS)
-    // ==========================================
-    function updateUI() {
-        let scoreStr = "Scores: ";
-        Object.keys(scores).forEach(id => {
-            let c = state.players[id]?.color || '#fff';
-            scoreStr += `<span style="color:${c}">${scores[id]}</span> `;
-        });
-        document.getElementById('scores-display').innerHTML = scoreStr;
-        
-        let msg = document.getElementById('message');
-        if(state.phase === 'countdown') { msg.style.display = 'block'; msg.innerText = Math.ceil(state.timer); }
-        else if(state.phase === 'round_over') { msg.style.display = 'block'; msg.innerText = "Round Over!"; }
-        else if(state.phase === 'match_over') { msg.style.display = 'block'; msg.innerText = "MATCH OVER!"; }
-        else { msg.style.display = 'none'; }
+    function updateHud() {
+      const entries = Object.entries(game.players || {}).sort((a, b) => (a[1].index || 0) - (b[1].index || 0));
+      scoresEl.innerHTML = "";
+      for (let i = 0; i < 4; i++) {
+        const entry = entries[i];
+        const div = document.createElement("div");
+        div.className = "score" + (entry?.[0] === uid ? " me" : "");
+        if (entry) {
+          const [id, p] = entry;
+          div.innerHTML = "<div class='name'></div><div class='points'></div>";
+          div.querySelector(".name").textContent = (p.name || "Player") + (id === game.bombCarrierId ? " - bomb" : "");
+          div.querySelector(".points").textContent = game.scores?.[id] || 0;
+        } else {
+          div.innerHTML = "<div class='name'>Open slot</div><div class='points'>-</div>";
+        }
+        scoresEl.appendChild(div);
+      }
     }
 
-    function render() {
-        ctx.clearRect(0, 0, arenaSize, arenaSize);
-        
-        // Grid Floor
-        ctx.strokeStyle = "rgba(0,0,0,0.05)";
-        ctx.lineWidth = 1;
-        for(let i=0; i<arenaSize; i+=40) {
-            ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, arenaSize); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(arenaSize, i); ctx.stroke();
-        }
-
-        let bSize = arenaSize * CONFIG.BOX_SIZE_RATIO;
-        let pRad = arenaSize * CONFIG.PLAYER_RADIUS_RATIO;
-
-        // Draw Boxes
-        state.boxes.forEach(b => {
-            ctx.fillStyle = "#7f8c8d";
-            ctx.strokeStyle = "#2c3e50";
-            ctx.lineWidth = 3;
-            ctx.fillRect(b.x - bSize/2, b.y - bSize/2, bSize, bSize);
-            ctx.strokeRect(b.x - bSize/2, b.y - bSize/2, bSize, bSize);
-        });
-
-        // Draw Players
-        Object.keys(state.players).forEach(id => {
-            let p = state.players[id];
-            ctx.globalAlpha = p.alive ? 1 : 0.3;
-            ctx.beginPath();
-            ctx.arc(p.x, p.y, pRad, 0, Math.PI*2);
-            ctx.fillStyle = p.color;
-            ctx.fill();
-            ctx.lineWidth = 4;
-            ctx.strokeStyle = (state.bomb === id && p.alive) ? (Date.now()%300<150 ? '#e74c3c' : '#fff') : '#2c3e50';
-            ctx.stroke();
-            ctx.globalAlpha = 1.0;
-        });
-
-        // Slingshot Preview Line
-        if(localInputs.dragging && state.phase === 'playing' && state.players[myId]?.alive) {
-            let p = state.players[myId];
-            let dx = localInputs.startX - localInputs.currentX;
-            let dy = localInputs.startY - localInputs.currentY;
-            let dist = Math.hypot(dx, dy);
-            let maxDrag = arenaSize * CONFIG.MAX_DRAG_RADIUS_RATIO;
-            
-            if(dist > 0) {
-                let power = Math.min(dist, maxDrag);
-                let drawX = p.x + (dx/dist) * power;
-                let drawY = p.y + (dy/dist) * power;
-                
-                ctx.beginPath();
-                ctx.moveTo(p.x, p.y);
-                ctx.lineTo(drawX, drawY);
-                ctx.strokeStyle = "rgba(255, 255, 255, 0.5)";
-                ctx.setLineDash([5, 5]);
-                ctx.lineWidth = 3;
-                ctx.stroke();
-                ctx.setLineDash([]);
-            }
-        }
-
-        // Center Timer
-        if(state.phase === 'playing') {
-            ctx.fillStyle = "rgba(0,0,0,0.2)";
-            ctx.font = "bold " + (arenaSize*0.3) + "px sans-serif";
-            ctx.textAlign = "center";
-            ctx.textBaseline = "middle";
-            ctx.fillText(Math.ceil(state.timer), arenaSize/2, arenaSize/2);
-        }
-
-        requestAnimationFrame(render);
+    function updateRoundText() {
+      if (!roomCode) {
+        roundText.textContent = "Waiting for room";
+        return;
+      }
+      const msg = renderState.message || renderState.phase || "Lobby";
+      roundText.textContent = "Round " + (renderState.round || 0) + " - " + msg;
+      if (renderState.phase === "matchEnd") showWinner();
     }
-</script>
+
+    function updateCornerTags() {
+      const entries = Object.entries(renderState.players || {}).sort((a, b) => (a[1].index || 0) - (b[1].index || 0));
+      tags.forEach((tag, i) => {
+        const p = entries[i]?.[1];
+        tag.textContent = p ? (p.name || "Player") : "";
+      });
+    }
+
+    function showWinner() {
+      const winner = renderState.players[renderState.winnerId]?.name || "Player";
+      overlay.style.display = "grid";
+      overlay.querySelector("h1").textContent = winner + " wins";
+      overlay.querySelector("p").textContent = "Match complete.";
+      $("createBtn").textContent = "New room";
+      overlayMsg.textContent = "Create or join another room to play again.";
+    }
+
+    function loop(ts) {
+      const dt = Math.min(0.033, (ts - lastFrame) / 1000 || 0);
+      lastFrame = ts;
+      hostStep(dt);
+      render(dt);
+      requestAnimationFrame(loop);
+    }
+
+    window.addEventListener("resize", resizeCanvas);
+    canvas.addEventListener("mousedown", onPointerStart);
+    window.addEventListener("mousemove", onPointerMove, { passive: false });
+    window.addEventListener("mouseup", onPointerEnd, { passive: false });
+    canvas.addEventListener("touchstart", onPointerStart, { passive: false });
+    canvas.addEventListener("touchmove", onPointerMove, { passive: false });
+    canvas.addEventListener("touchend", onPointerEnd, { passive: false });
+    canvas.addEventListener("touchcancel", onPointerEnd, { passive: false });
+    $("createBtn").addEventListener("click", createRoom);
+    $("joinBtn").addEventListener("click", () => joinExistingRoom($("joinInput").value, false));
+    startBtn.addEventListener("click", startMatchOrRound);
+
+    resizeCanvas();
+    updateHud();
+    requestAnimationFrame(loop);
+  </script>
 </body>
 </html>
