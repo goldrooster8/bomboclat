@@ -1,0 +1,1982 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Corner Rush - Multiplayer Hot Potato</title>
+
+    <!--
+    ============================================================
+    FIREBASE CONFIGURATION (already set to your project)
+    ============================================================
+    -->
+    <script type="module">
+        // Firebase CDN imports – version 12.16.0
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js';
+        import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js';
+        import { getDatabase, ref, set, update, get, onValue, onDisconnect, serverTimestamp } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-database.js';
+
+        // Your web app's Firebase configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyBfOKGz06urUqutCnDUfy6P2hMswoBifq8",
+            authDomain: "bomb-game-782c2.firebaseapp.com",
+            databaseURL: "https://bomb-game-782c2-default-rtdb.asia-southeast1.firebasedatabase.app",
+            projectId: "bomb-game-782c2",
+            storageBucket: "bomb-game-782c2.firebasestorage.app",
+            messagingSenderId: "984947565972",
+            appId: "1:984947565972:web:486661db2f7dab317bdb81"
+        };
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getDatabase(app);
+
+        // ============================================================
+        // ★★★ ADJUSTABLE GAME BALANCE CONFIG ★★★
+        // Tweak these values to change game feel and balance.
+        // ============================================================
+        const CONFIG = {
+            FUSE_DURATION: 12, // Seconds before bomb explodes
+            MIN_LOCKOUT: 0.5, // Seconds minimum between dashes (normal player)
+            CARRIER_LOCKOUT: 0.3, // Seconds minimum between dashes (bomb carrier advantage)
+            MAX_DRAG_RADIUS_RATIO: 0.2, // Max drag distance as fraction of arena width (20%)
+            PLAYER_FRICTION: 0.92, // Per-frame velocity multiplier for players (lower = more slide)
+            BOX_FRICTION: 0.94, // Per-frame velocity multiplier for boxes (higher = heavier, less slide)
+            NEAR_ZERO_VELOCITY_THRESHOLD: 5, // Pixels per second below which player is "stopped"
+            BOX_SIZE_RATIO: 0.055, // Box side length as fraction of arena width
+            PLAYER_RADIUS_RATIO: 0.024, // Player radius as fraction of arena width
+            ROUNDS_TO_WIN: 3, // First to this many round wins, wins the match
+            SYNC_RATE: 30, // Host writes state to Firebase this many times per second
+            DASH_SPEED_SCALAR: 5.2, // Multiplier: max dash speed = arenaWidth * this (pixels/sec)
+            PLAYER_BOX_BRAKE: 0.35, // Fraction of velocity retained when player hits a box
+            BOX_MOMENTUM_TRANSFER: 0.25, // Fraction of player's velocity transferred to box on collision
+            INTERP_LERP_FACTOR: 0.28, // Lerp factor for client-side interpolation (per frame)
+            EXPLOSION_DURATION: 0.8, // Seconds for explosion animation
+            COUNTDOWN_SECONDS: 3, // Pre-round countdown duration
+            GHOST_OPACITY: 0.3, // Opacity of eliminated players
+            PLAYER_COLORS: ['#FF4D6A', '#4DA6FF', '#4DFF88', '#FFB84D'], // Up to 4 player colors
+            PLAYER_GLOW_COLORS: ['#FF8FA0', '#8FC9FF', '#8FFFBB', '#FFD08F'],
+            BOMB_GLOW_COLOR: '#FF3300',
+            BOMB_PULSE_SPEED: 6, // Pulses per second for bomb glow
+            ARENA_BG_COLOR: '#1a1d23',
+            ARENA_GRID_COLOR: '#2a2d35',
+            ARENA_BORDER_COLOR: '#4a5568',
+            ARENA_BORDER_WIDTH_RATIO: 0.006, // Border width as fraction of arena
+        };
+        // ============================================================
+
+        // ────────────────────────────────────────
+        // DOM ELEMENTS
+        // ────────────────────────────────────────
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const arenaWrapper = document.getElementById('arenaWrapper');
+        const hudRoomCode = document.getElementById('hudRoomCode');
+        const hudScores = document.getElementById('hudScores');
+        const hudStatus = document.getElementById('hudStatus');
+        const lobbyOverlay = document.getElementById('lobbyOverlay');
+        const lobbyTitle = document.getElementById('lobbyTitle');
+        const createBtn = document.getElementById('createBtn');
+        const joinBtn = document.getElementById('joinBtn');
+        const roomCodeInput = document.getElementById('roomCodeInput');
+        const joinConfirmBtn = document.getElementById('joinConfirmBtn');
+        const cancelJoinBtn = document.getElementById('cancelJoinBtn');
+        const joinError = document.getElementById('joinError');
+        const roomDisplay = document.getElementById('roomDisplay');
+        const playerList = document.getElementById('playerList');
+        const startBtn = document.getElementById('startBtn');
+        const lobbyStatus = document.getElementById('lobbyStatus');
+        const tutorialOverlay = document.getElementById('tutorialOverlay');
+        const tutorialText = document.getElementById('tutorialText');
+        const winnerOverlay = document.getElementById('winnerOverlay');
+        const winnerText = document.getElementById('winnerText');
+        const winnerSub = document.getElementById('winnerSub');
+        const playAgainBtn = document.getElementById('playAgainBtn');
+
+        // ────────────────────────────────────────
+        // GAME STATE (Local)
+        // ────────────────────────────────────────
+        let myPlayerId = null;
+        let myPlayerName = 'Player';
+        let roomCode = null;
+        let isHost = false;
+        let gamePhase = 'lobby'; // lobby | countdown | playing | roundEnd | matchEnd
+        let arenaSize = 600; // Calculated dynamically
+        let arenaX = 0; // Canvas offset for arena
+        let arenaY = 0;
+
+        // Local player state (for rendering interpolation)
+        let localPlayers = {}; // { id: { x, y, vx, vy, alive, color, glowColor, name, score, displayX, displayY } }
+        let localBoxes = []; // [{ id, x, y, vx, vy, displayX, displayY }]
+        let localBomb = { carrierId: null, remainingFuse: CONFIG.FUSE_DURATION };
+        let localRoundScores = {};
+        let localMatchScores = {};
+        let localCountdownRemaining = 0;
+        let localRoundWinner = null;
+        let localMatchWinner = null;
+
+        // Dash state (local input)
+        let dragActive = false;
+        let dragStartX = 0;
+        let dragStartY = 0;
+        let dragCurrentX = 0;
+        let dragCurrentY = 0;
+        let lastDashTime = 0;
+        let pendingDashCommand = null;
+        let lastProcessedDashTimestamp = 0;
+
+        // Tutorial
+        let hasDashedOnce = false;
+
+        // Explosion effects (local rendering)
+        let explosions = [];
+
+        // Firebase refs
+        let roomRef = null;
+        let myPlayerRef = null;
+        let hostSyncInterval = null;
+        let clientReadUnsubscribe = null;
+
+        // ────────────────────────────────────────
+        // ARENA SIZING
+        // ────────────────────────────────────────
+        function recalculateArenaSize() {
+            const vw = window.innerWidth;
+            const vh = window.innerHeight;
+            const hudHeight = document.getElementById('hud').offsetHeight || 50;
+            const availableHeight = vh - hudHeight - 20;
+            const availableWidth = vw - 20;
+            const maxSize = Math.min(availableWidth, availableHeight, 900);
+            arenaSize = Math.max(280, Math.floor(maxSize));
+            arenaWrapper.style.width = arenaSize + 'px';
+            arenaWrapper.style.height = arenaSize + 'px';
+            canvas.width = arenaSize;
+            canvas.height = arenaSize;
+            arenaX = 0;
+            arenaY = 0;
+        }
+
+        window.addEventListener('resize', () => {
+            recalculateArenaSize();
+        });
+        window.addEventListener('orientationchange', () => {
+            setTimeout(recalculateArenaSize, 300);
+        });
+
+        // ────────────────────────────────────────
+        // FIREBASE HELPERS
+        // ────────────────────────────────────────
+        function generateRoomCode() {
+            return String(Math.floor(1000 + Math.random() * 9000));
+        }
+
+        function getPlayerColor(index) {
+            return CONFIG.PLAYER_COLORS[index % CONFIG.PLAYER_COLORS.length];
+        }
+        function getPlayerGlowColor(index) {
+            return CONFIG.PLAYER_GLOW_COLORS[index % CONFIG.PLAYER_GLOW_COLORS.length];
+        }
+
+        async function createRoom() {
+            const code = generateRoomCode();
+            roomCode = code;
+            roomRef = ref(db, '/rooms/' + code);
+
+            // Check if room exists
+            const snap = await get(roomRef);
+            if (snap.exists()) {
+                // Try another code
+                return createRoom();
+            }
+
+            isHost = true;
+            myPlayerName = 'Host_' + Math.floor(Math.random() * 1000);
+            await setupPlayerInRoom(code, 0);
+            await set(roomRef, {
+                hostId: myPlayerId,
+                gamePhase: 'lobby',
+                roundScores: {},
+                matchScores: {},
+                roundWinner: null,
+                matchWinner: null,
+                countdownEndTime: null,
+                bomb: {
+                    carrierId: null,
+                    fuseEndTime: null,
+                },
+                createdAt: serverTimestamp(),
+            });
+            await set(ref(db, '/rooms/' + code + '/players/' + myPlayerId), {
+                name: myPlayerName,
+                colorIndex: 0,
+                x: arenaSize * 0.5,
+                y: arenaSize * 0.5,
+                vx: 0,
+                vy: 0,
+                alive: true,
+                connected: true,
+                dashCommand: null,
+                score: 0,
+                joinedAt: serverTimestamp(),
+            });
+            myPlayerRef = ref(db, '/rooms/' + code + '/players/' + myPlayerId);
+            onDisconnect(myPlayerRef).update({ connected: false });
+
+            startClientListener(code);
+            updateLobbyUI();
+            lobbyOverlay.classList.add('hidden');
+            roomDisplay.textContent = 'Room: ' + code;
+            hudRoomCode.textContent = 'Room: ' + code;
+            document.getElementById('hostBadge').classList.remove('hidden');
+            startBtn.classList.remove('hidden');
+            lobbyStatus.textContent = 'Waiting for players...';
+            updatePlayerListUI();
+        }
+
+        async function joinRoom(code) {
+            roomCode = code;
+            roomRef = ref(db, '/rooms/' + code);
+            const snap = await get(roomRef);
+            if (!snap.exists()) {
+                joinError.textContent = 'Room not found. Check the code.';
+                joinError.classList.remove('hidden');
+                return false;
+            }
+            const roomData = snap.val();
+            if (roomData.gamePhase !== 'lobby') {
+                joinError.textContent = 'Game already in progress.';
+                joinError.classList.remove('hidden');
+                return false;
+            }
+            const players = roomData.players || {};
+            const playerCount = Object.keys(players).filter(k => players[k].connected).length;
+            if (playerCount >= 4) {
+                joinError.textContent = 'Room is full (4 players max).';
+                joinError.classList.remove('hidden');
+                return false;
+            }
+
+            isHost = false;
+            myPlayerName = 'Player_' + Math.floor(Math.random() * 1000);
+            const colorIndex = playerCount;
+            await setupPlayerInRoom(code, colorIndex);
+            myPlayerRef = ref(db, '/rooms/' + code + '/players/' + myPlayerId);
+            await set(myPlayerRef, {
+                name: myPlayerName,
+                colorIndex: colorIndex,
+                x: arenaSize * 0.5,
+                y: arenaSize * 0.5,
+                vx: 0,
+                vy: 0,
+                alive: true,
+                connected: true,
+                dashCommand: null,
+                score: 0,
+                joinedAt: serverTimestamp(),
+            });
+            onDisconnect(myPlayerRef).update({ connected: false });
+
+            startClientListener(code);
+            updateLobbyUI();
+            lobbyOverlay.classList.add('hidden');
+            roomDisplay.textContent = 'Room: ' + code;
+            hudRoomCode.textContent = 'Room: ' + code;
+            document.getElementById('hostBadge').classList.add('hidden');
+            startBtn.classList.add('hidden');
+            lobbyStatus.textContent = 'Waiting for host to start...';
+            updatePlayerListUI();
+            return true;
+        }
+
+        async function setupPlayerInRoom(code, colorIndex) {
+            // Sign in anonymously
+            if (!auth.currentUser) {
+                await signInAnonymously(auth);
+            }
+            myPlayerId = auth.currentUser.uid;
+            // Store color preference locally
+            localStorage.setItem('cornerRush_colorIndex', String(colorIndex));
+            localStorage.setItem('cornerRush_name', myPlayerName);
+        }
+
+        function startClientListener(code) {
+            if (clientReadUnsubscribe) clientReadUnsubscribe();
+            const roomDataRef = ref(db, '/rooms/' + code);
+            clientReadUnsubscribe = onValue(roomDataRef, (snapshot) => {
+                const data = snapshot.val();
+                if (!data) {
+                    // Room deleted
+                    handleRoomDeleted();
+                    return;
+                }
+                processServerState(data);
+            });
+        }
+
+        function processServerState(data) {
+            if (!data) return;
+            gamePhase = data.gamePhase || 'lobby';
+            localRoundScores = data.roundScores || {};
+            localMatchScores = data.matchScores || {};
+            localRoundWinner = data.roundWinner || null;
+            localMatchWinner = data.matchWinner || null;
+
+            // Update bomb
+            if (data.bomb) {
+                localBomb.carrierId = data.bomb.carrierId || null;
+                if (data.bomb.fuseEndTime && localBomb.carrierId) {
+                    const remaining = Math.max(0, (data.bomb.fuseEndTime - Date.now()) / 1000);
+                    localBomb.remainingFuse = remaining;
+                } else {
+                    localBomb.remainingFuse = CONFIG.FUSE_DURATION;
+                }
+            }
+
+            // Update players
+            const serverPlayers = data.players || {};
+            const allPlayerIds = new Set([
+                ...Object.keys(localPlayers),
+                ...Object.keys(serverPlayers),
+            ]);
+
+            for (const pid of allPlayerIds) {
+                const sp = serverPlayers[pid];
+                if (!sp || !sp.connected) {
+                    // Player disconnected or removed
+                    if (localPlayers[pid]) {
+                        localPlayers[pid].alive = false;
+                        localPlayers[pid].connected = false;
+                    }
+                    continue;
+                }
+                if (!localPlayers[pid]) {
+                    // New player
+                    const ci = sp.colorIndex || 0;
+                    localPlayers[pid] = {
+                        x: sp.x || arenaSize * 0.5,
+                        y: sp.y || arenaSize * 0.5,
+                        vx: sp.vx || 0,
+                        vy: sp.vy || 0,
+                        displayX: sp.x || arenaSize * 0.5,
+                        displayY: sp.y || arenaSize * 0.5,
+                        alive: sp.alive !== false,
+                        connected: true,
+                        color: getPlayerColor(ci),
+                        glowColor: getPlayerGlowColor(ci),
+                        name: sp.name || 'Player',
+                        score: sp.score || 0,
+                    };
+                } else {
+                    // Update existing player
+                    const lp = localPlayers[pid];
+                    lp.alive = sp.alive !== false;
+                    lp.connected = sp.connected !== false;
+                    lp.name = sp.name || lp.name;
+                    lp.score = sp.score || lp.score;
+                    // Update server position for interpolation
+                    lp.x = sp.x !== undefined ? sp.x : lp.x;
+                    lp.y = sp.y !== undefined ? sp.y : lp.y;
+                    lp.vx = sp.vx !== undefined ? sp.vx : lp.vx;
+                    lp.vy = sp.vy !== undefined ? sp.vy : lp.vy;
+                }
+            }
+
+            // Clean up fully disconnected players after a while
+            const now = Date.now();
+            for (const pid of Object.keys(localPlayers)) {
+                if (!serverPlayers[pid] && localPlayers[pid] && !localPlayers[pid].connected) {
+                    // Keep ghost for a bit, then remove
+                    if (!localPlayers[pid]._disconnectTime) {
+                        localPlayers[pid]._disconnectTime = now;
+                    }
+                    if (now - localPlayers[pid]._disconnectTime > 15000) {
+                        delete localPlayers[pid];
+                    }
+                }
+            }
+
+            // Update boxes
+            const serverBoxes = data.boxes;
+            if (serverBoxes) {
+                const boxKeys = Object.keys(serverBoxes);
+                // Ensure localBoxes array matches
+                while (localBoxes.length < boxKeys.length) {
+                    localBoxes.push({
+                        id: localBoxes.length,
+                        x: 0,
+                        y: 0,
+                        vx: 0,
+                        vy: 0,
+                        displayX: 0,
+                        displayY: 0,
+                    });
+                }
+                while (localBoxes.length > boxKeys.length) {
+                    localBoxes.pop();
+                }
+                for (let i = 0; i < boxKeys.length; i++) {
+                    const sb = serverBoxes[boxKeys[i]];
+                    if (sb && localBoxes[i]) {
+                        localBoxes[i].x = sb.x !== undefined ? sb.x : localBoxes[i].x;
+                        localBoxes[i].y = sb.y !== undefined ? sb.y : localBoxes[i].y;
+                        localBoxes[i].vx = sb.vx !== undefined ? sb.vx : localBoxes[i].vx;
+                        localBoxes[i].vy = sb.vy !== undefined ? sb.vy : localBoxes[i].vy;
+                        if (localBoxes[i].displayX === 0 && localBoxes[i].displayY === 0) {
+                            localBoxes[i].displayX = localBoxes[i].x;
+                            localBoxes[i].displayY = localBoxes[i].y;
+                        }
+                    }
+                }
+            }
+
+            // Countdown
+            if (data.countdownEndTime) {
+                localCountdownRemaining = Math.max(0, (data.countdownEndTime - Date.now()) / 1000);
+            } else {
+                localCountdownRemaining = 0;
+            }
+
+            // Update host badge
+            if (data.hostId && myPlayerId) {
+                const wasHost = isHost;
+                isHost = (data.hostId === myPlayerId);
+                if (isHost && !wasHost) {
+                    // We became host!
+                    startHostSyncLoop();
+                }
+                document.getElementById('hostBadge').classList.toggle('hidden', !isHost);
+                startBtn.classList.toggle('hidden', !isHost || gamePhase !== 'lobby');
+            }
+
+            updateHUD();
+            updatePlayerListUI();
+            handleGamePhaseUI();
+        }
+
+        function handleRoomDeleted() {
+            gamePhase = 'lobby';
+            roomCode = null;
+            isHost = false;
+            localPlayers = {};
+            localBoxes = [];
+            localBomb = { carrierId: null, remainingFuse: CONFIG.FUSE_DURATION };
+            explosions = [];
+            if (hostSyncInterval) clearInterval(hostSyncInterval);
+            hostSyncInterval = null;
+            if (clientReadUnsubscribe) clientReadUnsubscribe();
+            clientReadUnsubscribe = null;
+            lobbyOverlay.classList.remove('hidden');
+            document.getElementById('lobbyMain').classList.remove('hidden');
+            document.getElementById('lobbyRoom').classList.add('hidden');
+            document.getElementById('hostBadge').classList.add('hidden');
+            startBtn.classList.add('hidden');
+            roomDisplay.textContent = '';
+            hudRoomCode.textContent = '';
+            hudScores.textContent = '';
+            hudStatus.textContent = 'Disconnected from room.';
+            winnerOverlay.classList.add('hidden');
+            tutorialOverlay.classList.add('hidden');
+        }
+
+        function updateHUD() {
+            hudRoomCode.textContent = roomCode ? 'Room: ' + roomCode : '';
+            const scoreParts = [];
+            for (const pid of Object.keys(localMatchScores)) {
+                const p = localPlayers[pid];
+                const name = p ? p.name : pid.slice(0, 6);
+                scoreParts.push(name + ': ' + (localMatchScores[pid] || 0));
+            }
+            hudScores.textContent = scoreParts.join(' | ') || 'Scores';
+            if (gamePhase === 'lobby') {
+                hudStatus.textContent = isHost ? 'Waiting for players...' : 'Waiting for host...';
+            } else if (gamePhase === 'countdown') {
+                hudStatus.textContent = 'Starting in ' + Math.ceil(localCountdownRemaining) + '...';
+            } else if (gamePhase === 'playing') {
+                const aliveCount = Object.values(localPlayers).filter(p => p.alive && p.connected).length;
+                hudStatus.textContent = 'Alive: ' + aliveCount;
+            } else if (gamePhase === 'roundEnd') {
+                hudStatus.textContent = localRoundWinner ?
+                    (localPlayers[localRoundWinner]?.name || 'Someone') + ' wins the round!' :
+                    'Round Over!';
+            } else if (gamePhase === 'matchEnd') {
+                hudStatus.textContent = localMatchWinner ?
+                    (localPlayers[localMatchWinner]?.name || 'Someone') + ' wins the match! 🏆' :
+                    'Match Over!';
+            }
+        }
+
+        function updatePlayerListUI() {
+            const players = Object.values(localPlayers).filter(p => p.connected);
+            playerList.innerHTML = players.map(p => {
+                const isMe = Object.keys(localPlayers).find(k => localPlayers[k] === p) === myPlayerId;
+                const score = localMatchScores[Object.keys(localPlayers).find(k => localPlayers[k] === p)] || 0;
+                return `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;">
+              <span style="display:inline-block;width:14px;height:14px;border-radius:50%;background:${p.color};flex-shrink:0;"></span>
+              <span style="flex:1;">${p.name}${isMe ? ' (You)' : ''}</span>
+              <span>${'⭐'.repeat(score)}</span>
+              ${!p.alive ? '<span style="color:#ff6666;">💀</span>' : ''}
+            </div>`;
+            }).join('');
+            const playerCount = players.length;
+            lobbyStatus.textContent = playerCount >= 2 ?
+                (isHost ? 'Ready to start! (' + playerCount + ' players)' : 'Waiting for host to start... (' + playerCount +
+                    ' players)') :
+                'Waiting for players... (' + playerCount + '/2 min)';
+            if (isHost) {
+                startBtn.classList.toggle('hidden', gamePhase !== 'lobby' || playerCount < 2);
+            }
+        }
+
+        function handleGamePhaseUI() {
+            if (gamePhase === 'matchEnd' && localMatchWinner) {
+                const winner = localPlayers[localMatchWinner];
+                winnerText.textContent = (winner?.name || 'Someone') + ' Wins the Match!';
+                winnerSub.textContent = '🏆 First to ' + CONFIG.ROUNDS_TO_WIN + ' rounds!';
+                winnerOverlay.classList.remove('hidden');
+            } else if (gamePhase === 'roundEnd') {
+                // Brief round end state
+                winnerOverlay.classList.add('hidden');
+            } else if (gamePhase === 'playing' || gamePhase === 'countdown') {
+                winnerOverlay.classList.add('hidden');
+            }
+        }
+
+        // ────────────────────────────────────────
+        // HOST SYNC LOOP
+        // ────────────────────────────────────────
+        function startHostSyncLoop() {
+            if (hostSyncInterval) clearInterval(hostSyncInterval);
+            const intervalMs = 1000 / CONFIG.SYNC_RATE;
+            hostSyncInterval = setInterval(() => {
+                if (!isHost || !roomRef || gamePhase !== 'playing') return;
+                syncHostState();
+            }, intervalMs);
+        }
+
+        function syncHostState() {
+            if (!roomRef || !isHost) return;
+            const playerUpdates = {};
+            for (const pid of Object.keys(localPlayers)) {
+                const p = localPlayers[pid];
+                if (!p.connected && !p.alive) continue;
+                playerUpdates[pid] = {
+                    x: Math.round(p.x * 100) / 100,
+                    y: Math.round(p.y * 100) / 100,
+                    vx: Math.round(p.vx * 100) / 100,
+                    vy: Math.round(p.vy * 100) / 100,
+                    alive: p.alive,
+                    connected: p.connected,
+                    name: p.name,
+                    score: p.score,
+                };
+            }
+            const boxUpdates = {};
+            for (let i = 0; i < localBoxes.length; i++) {
+                boxUpdates['box_' + i] = {
+                    x: Math.round(localBoxes[i].x * 100) / 100,
+                    y: Math.round(localBoxes[i].y * 100) / 100,
+                    vx: Math.round(localBoxes[i].vx * 100) / 100,
+                    vy: Math.round(localBoxes[i].vy * 100) / 100,
+                };
+            }
+            const bombUpdate = {
+                carrierId: localBomb.carrierId,
+                fuseEndTime: localBomb.fuseEndTime || null,
+            };
+            update(roomRef, {
+                players: playerUpdates,
+                boxes: boxUpdates,
+                bomb: bombUpdate,
+                gamePhase: gamePhase,
+                roundScores: localRoundScores,
+                matchScores: localMatchScores,
+                roundWinner: localRoundWinner,
+                matchWinner: localMatchWinner,
+                countdownEndTime: localCountdownRemaining > 0 ? (Date.now() + localCountdownRemaining * 1000) : null,
+            });
+        }
+
+        // ────────────────────────────────────────
+        // HOST: START GAME / ROUND
+        // ────────────────────────────────────────
+        function hostStartGame() {
+            if (!isHost || gamePhase !== 'lobby') return;
+            const connectedPlayers = Object.entries(localPlayers).filter(([_, p]) => p.connected);
+            if (connectedPlayers.length < 2) return;
+            // Reset match scores
+            localMatchScores = {};
+            for (const [pid] of connectedPlayers) {
+                localMatchScores[pid] = 0;
+            }
+            localRoundScores = {};
+            hostStartRound();
+        }
+
+        function hostStartRound() {
+            if (!isHost) return;
+            // Reset all players to alive
+            for (const pid of Object.keys(localPlayers)) {
+                if (localPlayers[pid].connected) {
+                    localPlayers[pid].alive = true;
+                    localPlayers[pid].x = arenaSize * 0.5 + (Math.random() - 0.5) * arenaSize * 0.3;
+                    localPlayers[pid].y = arenaSize * 0.5 + (Math.random() - 0.5) * arenaSize * 0.3;
+                    localPlayers[pid].vx = 0;
+                    localPlayers[pid].vy = 0;
+                    localPlayers[pid].displayX = localPlayers[pid].x;
+                    localPlayers[pid].displayY = localPlayers[pid].y;
+                }
+            }
+            // Reset boxes to initial positions
+            initializeBoxPositions();
+            // Reset bomb
+            localBomb.carrierId = null;
+            localBomb.fuseEndTime = null;
+            localBomb.remainingFuse = CONFIG.FUSE_DURATION;
+            localRoundWinner = null;
+            localCountdownRemaining = CONFIG.COUNTDOWN_SECONDS;
+            gamePhase = 'countdown';
+            explosions = [];
+
+            // Sync immediately
+            update(roomRef, {
+                gamePhase: 'countdown',
+                countdownEndTime: Date.now() + CONFIG.COUNTDOWN_SECONDS * 1000,
+                roundWinner: null,
+                matchWinner: null,
+                bomb: { carrierId: null, fuseEndTime: null },
+                roundScores: {},
+            });
+            syncHostState();
+
+            // After countdown, start playing
+            setTimeout(() => {
+                if (gamePhase !== 'countdown') return;
+                hostBeginPlaying();
+            }, CONFIG.COUNTDOWN_SECONDS * 1000);
+        }
+
+        function hostBeginPlaying() {
+            if (!isHost) return;
+            gamePhase = 'playing';
+            localCountdownRemaining = 0;
+            // Assign bomb to random player
+            const alivePlayers = Object.entries(localPlayers).filter(([_, p]) => p.alive && p.connected);
+            if (alivePlayers.length >= 2) {
+                const randomIndex = Math.floor(Math.random() * alivePlayers.length);
+                localBomb.carrierId = alivePlayers[randomIndex][0];
+                localBomb.fuseEndTime = Date.now() + CONFIG.FUSE_DURATION * 1000;
+                localBomb.remainingFuse = CONFIG.FUSE_DURATION;
+            }
+            update(roomRef, {
+                gamePhase: 'playing',
+                countdownEndTime: null,
+                bomb: {
+                    carrierId: localBomb.carrierId,
+                    fuseEndTime: localBomb.fuseEndTime,
+                },
+            });
+            startHostSyncLoop();
+        }
+
+        function hostEliminatePlayer(pid) {
+            if (!isHost || !localPlayers[pid]) return;
+            localPlayers[pid].alive = false;
+            localPlayers[pid].vx = 0;
+            localPlayers[pid].vy = 0;
+            // Create explosion effect
+            explosions.push({
+                x: localPlayers[pid].x,
+                y: localPlayers[pid].y,
+                startTime: Date.now(),
+                duration: CONFIG.EXPLOSION_DURATION * 1000,
+                maxRadius: arenaSize * 0.15,
+            });
+            // Check if only one player remains
+            const alivePlayers = Object.entries(localPlayers).filter(([_, p]) => p.alive && p.connected);
+            if (alivePlayers.length <= 1) {
+                hostEndRound(alivePlayers.length === 1 ? alivePlayers[0][0] : null);
+            } else {
+                // Assign new bomb
+                if (localBomb.carrierId === pid || !localBomb.carrierId || !localPlayers[localBomb.carrierId]?.alive) {
+                    const randomIndex = Math.floor(Math.random() * alivePlayers.length);
+                    localBomb.carrierId = alivePlayers[randomIndex][0];
+                    localBomb.fuseEndTime = Date.now() + CONFIG.FUSE_DURATION * 1000;
+                    localBomb.remainingFuse = CONFIG.FUSE_DURATION;
+                }
+            }
+        }
+
+        function hostEndRound(winnerId) {
+            if (!isHost) return;
+            gamePhase = 'roundEnd';
+            localRoundWinner = winnerId;
+            if (winnerId) {
+                localMatchScores[winnerId] = (localMatchScores[winnerId] || 0) + 1;
+                if (localMatchScores[winnerId] >= CONFIG.ROUNDS_TO_WIN) {
+                    localMatchWinner = winnerId;
+                    gamePhase = 'matchEnd';
+                }
+            }
+            localBomb.carrierId = null;
+            localBomb.fuseEndTime = null;
+            if (hostSyncInterval) clearInterval(hostSyncInterval);
+            hostSyncInterval = null;
+            update(roomRef, {
+                gamePhase: gamePhase,
+                roundWinner: localRoundWinner,
+                matchWinner: localMatchWinner,
+                matchScores: localMatchScores,
+                bomb: { carrierId: null, fuseEndTime: null },
+                countdownEndTime: null,
+            });
+            syncHostState();
+
+            if (gamePhase === 'matchEnd') {
+                // Stay in match end
+                setTimeout(() => {
+                    if (isHost && gamePhase === 'matchEnd') {
+                        hostResetToLobby();
+                    }
+                }, 8000);
+            } else {
+                // Start next round after delay
+                setTimeout(() => {
+                    if (isHost && gamePhase === 'roundEnd') {
+                        hostStartRound();
+                    }
+                }, 3000);
+            }
+        }
+
+        function hostResetToLobby() {
+            if (!isHost) return;
+            gamePhase = 'lobby';
+            localRoundWinner = null;
+            localMatchWinner = null;
+            localMatchScores = {};
+            localRoundScores = {};
+            localBomb = { carrierId: null, remainingFuse: CONFIG.FUSE_DURATION, fuseEndTime: null };
+            localCountdownRemaining = 0;
+            for (const pid of Object.keys(localPlayers)) {
+                if (localPlayers[pid].connected) {
+                    localPlayers[pid].alive = true;
+                    localPlayers[pid].score = 0;
+                    localPlayers[pid].x = arenaSize * 0.5;
+                    localPlayers[pid].y = arenaSize * 0.5;
+                    localPlayers[pid].vx = 0;
+                    localPlayers[pid].vy = 0;
+                }
+            }
+            initializeBoxPositions();
+            explosions = [];
+            if (hostSyncInterval) clearInterval(hostSyncInterval);
+            hostSyncInterval = null;
+            update(roomRef, {
+                gamePhase: 'lobby',
+                roundWinner: null,
+                matchWinner: null,
+                matchScores: {},
+                roundScores: {},
+                bomb: { carrierId: null, fuseEndTime: null },
+                countdownEndTime: null,
+            });
+            syncHostState();
+        }
+
+        // ────────────────────────────────────────
+        // BOX INITIALIZATION
+        // ────────────────────────────────────────
+        function initializeBoxPositions() {
+            const boxSize = CONFIG.BOX_SIZE_RATIO * arenaSize;
+            const gridCols = 10;
+            const gridRows = 6;
+            const cellW = arenaSize / gridCols;
+            const cellH = arenaSize / gridRows;
+            // Pattern: 1 = box, 0 = empty
+            const pattern = [
+                [0, 0, 1, 1, 0, 0, 1, 1, 0, 0], // row 0
+                [0, 0, 1, 0, 0, 0, 0, 0, 1, 0], // row 1
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], // row 2
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], // row 3
+                [0, 0, 1, 0, 0, 0, 0, 0, 1, 0], // row 4
+                [0, 0, 1, 1, 0, 0, 1, 1, 0, 0], // row 5
+            ];
+            localBoxes = [];
+            let boxId = 0;
+            for (let row = 0; row < gridRows; row++) {
+                for (let col = 0; col < gridCols; col++) {
+                    if (pattern[row][col] === 1) {
+                        const bx = col * cellW + cellW / 2;
+                        const by = row * cellH + cellH / 2;
+                        localBoxes.push({
+                            id: boxId,
+                            x: bx,
+                            y: by,
+                            vx: 0,
+                            vy: 0,
+                            displayX: bx,
+                            displayY: by,
+                        });
+                        boxId++;
+                    }
+                }
+            }
+        }
+
+        // ────────────────────────────────────────
+        // HOST PHYSICS LOOP (runs locally for host, results synced)
+        // ────────────────────────────────────────
+        let lastPhysicsTime = 0;
+
+        function hostPhysicsLoop(timestamp) {
+            if (!lastPhysicsTime) lastPhysicsTime = timestamp;
+            let dt = (timestamp - lastPhysicsTime) / 1000;
+            lastPhysicsTime = timestamp;
+
+            // Cap dt to avoid jumps
+            if (dt > 0.1) dt = 0.1;
+            if (dt <= 0) dt = 0.016;
+
+            if (isHost && gamePhase === 'playing') {
+                runHostPhysics(dt);
+            }
+
+            // Interpolate all clients' display positions
+            interpolateDisplayPositions();
+
+            // Render
+            render(timestamp, dt);
+
+            requestAnimationFrame(hostPhysicsLoop);
+        }
+
+        function runHostPhysics(dt) {
+            const frictionPerFrame = Math.pow(CONFIG.PLAYER_FRICTION, dt * 60);
+            const boxFrictionPerFrame = Math.pow(CONFIG.BOX_FRICTION, dt * 60);
+            const threshold = CONFIG.NEAR_ZERO_VELOCITY_THRESHOLD;
+
+            // Process dash commands from all players
+            for (const pid of Object.keys(localPlayers)) {
+                const p = localPlayers[pid];
+                if (!p || !p.alive || !p.connected) continue;
+                // Check for dash command (written by clients to Firebase, read into local state)
+                // For host's own player, check pendingDashCommand
+                if (pid === myPlayerId && pendingDashCommand) {
+                    applyDash(pid, pendingDashCommand.dx, pendingDashCommand.dy, pendingDashCommand.power);
+                    pendingDashCommand = null;
+                }
+                // For remote players, dash command is processed when we read it from Firebase
+                // The dashCommand field is checked in processRemoteDashCommands
+            }
+            processRemoteDashCommands();
+
+            // Update player positions
+            for (const pid of Object.keys(localPlayers)) {
+                const p = localPlayers[pid];
+                if (!p || !p.alive) continue;
+                p.x += p.vx * dt;
+                p.y += p.vy * dt;
+                p.vx *= frictionPerFrame;
+                p.vy *= frictionPerFrame;
+                if (Math.abs(p.vx) < threshold * dt) p.vx = 0;
+                if (Math.abs(p.vy) < threshold * dt) p.vy = 0;
+                // Clamp to arena
+                const pr = CONFIG.PLAYER_RADIUS_RATIO * arenaSize;
+                p.x = Math.max(pr, Math.min(arenaSize - pr, p.x));
+                p.y = Math.max(pr, Math.min(arenaSize - pr, p.y));
+                if (p.x <= pr || p.x >= arenaSize - pr) p.vx = 0;
+                if (p.y <= pr || p.y >= arenaSize - pr) p.vy = 0;
+            }
+
+            // Update box positions
+            const boxSize = CONFIG.BOX_SIZE_RATIO * arenaSize;
+            const halfBox = boxSize / 2;
+            for (const box of localBoxes) {
+                box.x += box.vx * dt;
+                box.y += box.vy * dt;
+                box.vx *= boxFrictionPerFrame;
+                box.vy *= boxFrictionPerFrame;
+                if (Math.abs(box.vx) < threshold * dt * 0.5) box.vx = 0;
+                if (Math.abs(box.vy) < threshold * dt * 0.5) box.vy = 0;
+                // Clamp to arena
+                box.x = Math.max(halfBox, Math.min(arenaSize - halfBox, box.x));
+                box.y = Math.max(halfBox, Math.min(arenaSize - halfBox, box.y));
+                if (box.x <= halfBox || box.x >= arenaSize - halfBox) box.vx = 0;
+                if (box.y <= halfBox || box.y >= arenaSize - halfBox) box.vy = 0;
+            }
+
+            // Player-Box collisions
+            const pr = CONFIG.PLAYER_RADIUS_RATIO * arenaSize;
+            for (const pid of Object.keys(localPlayers)) {
+                const p = localPlayers[pid];
+                if (!p || !p.alive) continue;
+                for (const box of localBoxes) {
+                    const closestX = Math.max(box.x - halfBox, Math.min(p.x, box.x + halfBox));
+                    const closestY = Math.max(box.y - halfBox, Math.min(p.y, box.y + halfBox));
+                    const dx = p.x - closestX;
+                    const dy = p.y - closestY;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    if (dist < pr && dist > 0.001) {
+                        // Push player out
+                        const overlap = pr - dist;
+                        const nx = dx / dist;
+                        const ny = dy / dist;
+                        p.x += nx * overlap;
+                        p.y += ny * overlap;
+                        // Transfer momentum
+                        const playerSpeed = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
+                        const dotProduct = (p.vx * nx + p.vy * ny);
+                        if (dotProduct > 0) {
+                            const transferX = nx * dotProduct * CONFIG.BOX_MOMENTUM_TRANSFER;
+                            const transferY = ny * dotProduct * CONFIG.BOX_MOMENTUM_TRANSFER;
+                            box.vx += transferX;
+                            box.vy += transferY;
+                            p.vx -= transferX * (1 / CONFIG.BOX_MOMENTUM_TRANSFER) * CONFIG.PLAYER_BOX_BRAKE *
+                                CONFIG.BOX_MOMENTUM_TRANSFER;
+                            p.vy -= transferY * (1 / CONFIG.BOX_MOMENTUM_TRANSFER) * CONFIG.PLAYER_BOX_BRAKE *
+                                CONFIG.BOX_MOMENTUM_TRANSFER;
+                        }
+                        p.vx *= CONFIG.PLAYER_BOX_BRAKE;
+                        p.vy *= CONFIG.PLAYER_BOX_BRAKE;
+                    }
+                }
+            }
+
+            // Box-Box collisions
+            for (let i = 0; i < localBoxes.length; i++) {
+                for (let j = i + 1; j < localBoxes.length; j++) {
+                    const a = localBoxes[i];
+                    const b = localBoxes[j];
+                    const overlapX = (halfBox + halfBox) - Math.abs(a.x - b.x);
+                    const overlapY = (halfBox + halfBox) - Math.abs(a.y - b.y);
+                    if (overlapX > 0 && overlapY > 0) {
+                        if (overlapX < overlapY) {
+                            const sign = a.x < b.x ? -1 : 1;
+                            a.x += sign * overlapX / 2;
+                            b.x -= sign * overlapX / 2;
+                            const tempVx = a.vx;
+                            a.vx = b.vx * 0.5;
+                            b.vx = tempVx * 0.5;
+                        } else {
+                            const sign = a.y < b.y ? -1 : 1;
+                            a.y += sign * overlapY / 2;
+                            b.y -= sign * overlapY / 2;
+                            const tempVy = a.vy;
+                            a.vy = b.vy * 0.5;
+                            b.vy = tempVy * 0.5;
+                        }
+                    }
+                }
+            }
+
+            // Player-Player collisions (for bomb passing)
+            const alivePlayers = Object.entries(localPlayers).filter(([_, p]) => p.alive && p.connected);
+            for (let i = 0; i < alivePlayers.length; i++) {
+                for (let j = i + 1; j < alivePlayers.length; j++) {
+                    const [pidA, pA] = alivePlayers[i];
+                    const [pidB, pB] = alivePlayers[j];
+                    const dx = pA.x - pB.x;
+                    const dy = pA.y - pB.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    const minDist = pr * 2;
+                    if (dist < minDist && dist > 0.001) {
+                        // Separate
+                        const overlap = (minDist - dist) / 2;
+                        const nx = dx / dist;
+                        const ny = dy / dist;
+                        pA.x += nx * overlap;
+                        pA.y += ny * overlap;
+                        pB.x -= nx * overlap;
+                        pB.y -= ny * overlap;
+                        // Bomb pass
+                        if (localBomb.carrierId === pidA && pB.alive) {
+                            localBomb.carrierId = pidB;
+                            localBomb.fuseEndTime = Date.now() + localBomb.remainingFuse * 1000;
+                        } else if (localBomb.carrierId === pidB && pA.alive) {
+                            localBomb.carrierId = pidA;
+                            localBomb.fuseEndTime = Date.now() + localBomb.remainingFuse * 1000;
+                        }
+                        // Slight bounce
+                        const relVx = pA.vx - pB.vx;
+                        const relVy = pA.vy - pB.vy;
+                        const relDotN = relVx * nx + relVy * ny;
+                        if (relDotN > 0) {
+                            pA.vx -= nx * relDotN * 0.5;
+                            pA.vy -= ny * relDotN * 0.5;
+                            pB.vx += nx * relDotN * 0.5;
+                            pB.vy += ny * relDotN * 0.5;
+                        }
+                    }
+                }
+            }
+
+            // Bomb fuse check
+            if (localBomb.carrierId && localBomb.fuseEndTime) {
+                localBomb.remainingFuse = Math.max(0, (localBomb.fuseEndTime - Date.now()) / 1000);
+                if (localBomb.remainingFuse <= 0 && localPlayers[localBomb.carrierId]?.alive) {
+                    hostEliminatePlayer(localBomb.carrierId);
+                }
+            }
+
+            // Check if bomb carrier died/disconnected
+            if (localBomb.carrierId && (!localPlayers[localBomb.carrierId] || !localPlayers[localBomb.carrierId].alive)) {
+                const remainingAlive = Object.entries(localPlayers).filter(([_, p]) => p.alive && p.connected);
+                if (remainingAlive.length >= 2) {
+                    const randomIndex = Math.floor(Math.random() * remainingAlive.length);
+                    localBomb.carrierId = remainingAlive[randomIndex][0];
+                    localBomb.fuseEndTime = Date.now() + CONFIG.FUSE_DURATION * 1000;
+                } else {
+                    localBomb.carrierId = null;
+                    localBomb.fuseEndTime = null;
+                }
+            }
+        }
+
+        function processRemoteDashCommands() {
+            // Check all players' dashCommand field (would be read from Firebase in processServerState)
+            // For now, dash commands are handled via the Firebase data flow
+            // When processServerState reads a dashCommand, we apply it here
+            for (const pid of Object.keys(localPlayers)) {
+                const p = localPlayers[pid];
+                if (!p || pid === myPlayerId) continue;
+                if (p._pendingDash && p._pendingDash.timestamp > (p._lastDashProcessed || 0)) {
+                    applyDash(pid, p._pendingDash.dx, p._pendingDash.dy, p._pendingDash.power);
+                    p._lastDashProcessed = p._pendingDash.timestamp;
+                    p._pendingDash = null;
+                }
+            }
+        }
+
+        function applyDash(pid, dx, dy, power) {
+            const p = localPlayers[pid];
+            if (!p || !p.alive) return;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < 0.001) return;
+            const nx = dx / dist;
+            const ny = dy / dist;
+            const maxSpeed = arenaSize * CONFIG.DASH_SPEED_SCALAR;
+            const speed = power * maxSpeed;
+            p.vx = nx * speed;
+            p.vy = ny * speed;
+            lastDashTime = Date.now();
+            if (pid === myPlayerId) {
+                lastProcessedDashTimestamp = Date.now();
+                if (!hasDashedOnce) {
+                    hasDashedOnce = true;
+                    tutorialOverlay.classList.add('hidden');
+                }
+            }
+        }
+
+        // ────────────────────────────────────────
+        // INTERPOLATION
+        // ────────────────────────────────────────
+        function interpolateDisplayPositions() {
+            const factor = CONFIG.INTERP_LERP_FACTOR;
+            for (const pid of Object.keys(localPlayers)) {
+                const p = localPlayers[pid];
+                if (!p) continue;
+                p.displayX = p.displayX + (p.x - p.displayX) * factor;
+                p.displayY = p.displayY + (p.y - p.displayY) * factor;
+            }
+            for (const box of localBoxes) {
+                box.displayX = box.displayX + (box.x - box.displayX) * factor;
+                box.displayY = box.displayY + (box.y - box.displayY) * factor;
+            }
+        }
+
+        // ────────────────────────────────────────
+        // RENDERING
+        // ────────────────────────────────────────
+        function render(timestamp, dt) {
+            ctx.clearRect(0, 0, arenaSize, arenaSize);
+
+            // Arena background
+            ctx.fillStyle = CONFIG.ARENA_BG_COLOR;
+            ctx.fillRect(0, 0, arenaSize, arenaSize);
+
+            // Grid pattern
+            const gridSpacing = arenaSize / 20;
+            ctx.strokeStyle = CONFIG.ARENA_GRID_COLOR;
+            ctx.lineWidth = 0.5;
+            for (let x = gridSpacing; x < arenaSize; x += gridSpacing) {
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, arenaSize);
+                ctx.stroke();
+            }
+            for (let y = gridSpacing; y < arenaSize; y += gridSpacing) {
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(arenaSize, y);
+                ctx.stroke();
+            }
+
+            // Arena border
+            const borderW = CONFIG.ARENA_BORDER_WIDTH_RATIO * arenaSize;
+            ctx.strokeStyle = CONFIG.ARENA_BORDER_COLOR;
+            ctx.lineWidth = borderW;
+            ctx.strokeRect(borderW / 2, borderW / 2, arenaSize - borderW, arenaSize - borderW);
+
+            // Draw boxes
+            const boxSize = CONFIG.BOX_SIZE_RATIO * arenaSize;
+            for (const box of localBoxes) {
+                const bx = box.displayX - boxSize / 2;
+                const by = box.displayY - boxSize / 2;
+                // Box fill
+                ctx.fillStyle = '#5c4a3d';
+                ctx.fillRect(bx, by, boxSize, boxSize);
+                // Box outline
+                ctx.strokeStyle = '#1a1008';
+                ctx.lineWidth = Math.max(2, boxSize * 0.15);
+                ctx.strokeRect(bx, by, boxSize, boxSize);
+                // Subtle highlight
+                ctx.fillStyle = 'rgba(255,255,255,0.08)';
+                ctx.fillRect(bx + boxSize * 0.1, by + boxSize * 0.1, boxSize * 0.5, boxSize * 0.3);
+            }
+
+            // Draw players
+            const pr = CONFIG.PLAYER_RADIUS_RATIO * arenaSize;
+            const playerEntries = Object.entries(localPlayers).filter(([_, p]) => p.connected || p.alive === false);
+            // Sort so bomb carrier is drawn on top
+            playerEntries.sort((a, b) => {
+                if (a[0] === localBomb.carrierId) return 1;
+                if (b[0] === localBomb.carrierId) return -1;
+                return 0;
+            });
+
+            for (const [pid, p] of playerEntries) {
+                if (!p || (!p.connected && !p.alive && p._disconnectTime && Date.now() - p._disconnectTime > 10000))
+                continue;
+                const px = p.displayX;
+                const py = p.displayY;
+                const isAlive = p.alive && p.connected;
+                const isCarrier = pid === localBomb.carrierId && isAlive;
+
+                ctx.save();
+                if (!isAlive) {
+                    ctx.globalAlpha = CONFIG.GHOST_OPACITY;
+                }
+
+                // Glow (carrier)
+                if (isCarrier) {
+                    const pulse = 0.6 + 0.4 * Math.sin(timestamp / 1000 * CONFIG.BOMB_PULSE_SPEED * Math.PI * 2);
+                    const glowRadius = pr * (2.0 + pulse * 1.2);
+                    const glow = ctx.createRadialGradient(px, py, pr * 0.5, px, py, glowRadius);
+                    glow.addColorStop(0, CONFIG.BOMB_GLOW_COLOR);
+                    glow.addColorStop(0.5, 'rgba(255,80,20,0.4)');
+                    glow.addColorStop(1, 'rgba(255,30,0,0)');
+                    ctx.fillStyle = glow;
+                    ctx.beginPath();
+                    ctx.arc(px, py, glowRadius, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+
+                // Body
+                const bodyGrad = ctx.createRadialGradient(px - pr * 0.3, py - pr * 0.3, pr * 0.1, px, py, pr);
+                bodyGrad.addColorStop(0, '#ffffff');
+                bodyGrad.addColorStop(0.4, p.color);
+                bodyGrad.addColorStop(1, 'rgba(0,0,0,0.4)');
+                ctx.fillStyle = bodyGrad;
+                ctx.beginPath();
+                ctx.arc(px, py, pr, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Outline
+                ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+                ctx.lineWidth = Math.max(1.5, pr * 0.2);
+                ctx.stroke();
+
+                // Bomb icon on carrier
+                if (isCarrier) {
+                    const bombSize = pr * 0.7;
+                    ctx.fillStyle = '#111';
+                    ctx.beginPath();
+                    ctx.arc(px, py - pr * 0.3, bombSize, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.fillStyle = CONFIG.BOMB_GLOW_COLOR;
+                    ctx.beginPath();
+                    ctx.arc(px, py - pr * 0.3, bombSize * 0.7, 0, Math.PI * 2);
+                    ctx.fill();
+                    // Fuse spark
+                    const sparkAngle = timestamp / 200;
+                    ctx.strokeStyle = '#ffaa00';
+                    ctx.lineWidth = 1.5;
+                    ctx.beginPath();
+                    ctx.moveTo(px, py - pr * 0.3 - bombSize);
+                    ctx.quadraticCurveTo(px + Math.cos(sparkAngle) * bombSize * 1.5, py - pr * 0.3 - bombSize * 1.2,
+                        px + Math.cos(sparkAngle * 1.7) * bombSize * 2, py - pr * 0.3 - bombSize * 0.5);
+                    ctx.stroke();
+                }
+
+                // Name tag
+                ctx.fillStyle = 'rgba(0,0,0,0.7)';
+                const nameWidth = ctx.measureText(p.name).width + 10;
+                ctx.fillRect(px - nameWidth / 2, py - pr - 22, nameWidth, 18);
+                ctx.fillStyle = '#fff';
+                ctx.font = Math.max(10, pr * 0.7) + 'px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(p.name, px, py - pr - 8);
+
+                ctx.restore();
+            }
+
+            // Draw center fuse timer
+            if (gamePhase === 'playing' && localBomb.carrierId && localBomb.remainingFuse > 0) {
+                const remaining = localBomb.remainingFuse;
+                const cx = arenaSize / 2;
+                const cy = arenaSize / 2;
+                ctx.save();
+                ctx.globalAlpha = 0.45;
+                // Pulsing ring
+                const ringPulse = 1 + 0.08 * Math.sin(timestamp / 300);
+                const ringRadius = arenaSize * 0.12 * ringPulse;
+                ctx.strokeStyle = remaining < 4 ? '#ff3333' : remaining < 7 ? '#ffaa00' : '#ffffff';
+                ctx.lineWidth = Math.max(3, arenaSize * 0.008);
+                ctx.beginPath();
+                ctx.arc(cx, cy, ringRadius, 0, Math.PI * 2);
+                ctx.stroke();
+                // Number
+                const fontSize = arenaSize * 0.14;
+                ctx.font = 'bold ' + fontSize + 'px monospace';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillStyle = remaining < 4 ? '#ff3333' : remaining < 7 ? '#ffaa00' : '#ffffff';
+                ctx.fillText(Math.ceil(remaining), cx, cy);
+                ctx.restore();
+            }
+
+            // Draw countdown
+            if (gamePhase === 'countdown' && localCountdownRemaining > 0) {
+                const cx = arenaSize / 2;
+                const cy = arenaSize / 2;
+                ctx.save();
+                ctx.globalAlpha = 0.7;
+                const fontSize = arenaSize * 0.2;
+                ctx.font = 'bold ' + fontSize + 'px monospace';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillStyle = '#ffffff';
+                ctx.fillText(Math.ceil(localCountdownRemaining), cx, cy);
+                ctx.restore();
+            }
+
+            // Draw drag indicator (slingshot)
+            if (dragActive && myPlayerId && localPlayers[myPlayerId]?.alive) {
+                const p = localPlayers[myPlayerId];
+                const px = p.displayX;
+                const py = p.displayY;
+                const dragDx = dragCurrentX - dragStartX;
+                const dragDy = dragCurrentY - dragStartY;
+                const maxDrag = CONFIG.MAX_DRAG_RADIUS_RATIO * arenaSize;
+                const dragDist = Math.min(Math.sqrt(dragDx * dragDx + dragDy * dragDy), maxDrag);
+                const dragAngle = Math.atan2(dragDy, dragDx);
+                // Dash direction is opposite
+                const dashAngle = dragAngle + Math.PI;
+                const dashEndX = px + Math.cos(dashAngle) * dragDist;
+                const dashEndY = py + Math.sin(dashAngle) * dragDist;
+
+                ctx.save();
+                // Drag line (from player, opposite to drag)
+                ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+                ctx.lineWidth = Math.max(2, arenaSize * 0.004);
+                ctx.setLineDash([8, 6]);
+                ctx.beginPath();
+                ctx.moveTo(px, py);
+                ctx.lineTo(dashEndX, dashEndY);
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                // Arrow head
+                const arrowSize = Math.max(8, arenaSize * 0.02);
+                const arrowAngle1 = dashAngle + Math.PI * 0.75;
+                const arrowAngle2 = dashAngle - Math.PI * 0.75;
+                ctx.fillStyle = 'rgba(255,255,255,0.7)';
+                ctx.beginPath();
+                ctx.moveTo(dashEndX, dashEndY);
+                ctx.lineTo(dashEndX + Math.cos(arrowAngle1) * arrowSize, dashEndY + Math.sin(arrowAngle1) * arrowSize);
+                ctx.lineTo(dashEndX + Math.cos(arrowAngle2) * arrowSize, dashEndY + Math.sin(arrowAngle2) * arrowSize);
+                ctx.closePath();
+                ctx.fill();
+
+                // Power indicator ring at player
+                const powerRatio = dragDist / maxDrag;
+                ctx.strokeStyle = 'rgba(255,255,255,' + (0.3 + powerRatio * 0.5) + ')';
+                ctx.lineWidth = Math.max(2, arenaSize * 0.005);
+                ctx.beginPath();
+                ctx.arc(px, py, pr * 1.8, dashAngle - Math.PI * powerRatio, dashAngle + Math.PI * powerRatio);
+                ctx.stroke();
+
+                ctx.restore();
+            }
+
+            // Draw explosions
+            const now = Date.now();
+            for (let i = explosions.length - 1; i >= 0; i--) {
+                const exp = explosions[i];
+                const elapsed = (now - exp.startTime) / exp.duration;
+                if (elapsed >= 1) {
+                    explosions.splice(i, 1);
+                    continue;
+                }
+                const radius = exp.maxRadius * elapsed;
+                const alpha = 1 - elapsed;
+                ctx.save();
+                ctx.globalAlpha = alpha;
+                const grad = ctx.createRadialGradient(exp.x, exp.y, radius * 0.2, exp.x, exp.y, radius);
+                grad.addColorStop(0, '#ffffff');
+                grad.addColorStop(0.3, '#ffaa00');
+                grad.addColorStop(0.7, '#ff3300');
+                grad.addColorStop(1, 'rgba(255,20,0,0)');
+                ctx.fillStyle = grad;
+                ctx.beginPath();
+                ctx.arc(exp.x, exp.y, radius, 0, Math.PI * 2);
+                ctx.fill();
+                // Particles
+                for (let j = 0; j < 8; j++) {
+                    const angle = (j / 8) * Math.PI * 2 + elapsed * 3;
+                    const dist = radius * (0.5 + elapsed * 0.5);
+                    const px2 = exp.x + Math.cos(angle) * dist;
+                    const py2 = exp.y + Math.sin(angle) * dist;
+                    ctx.fillStyle = '#ffcc00';
+                    ctx.beginPath();
+                    ctx.arc(px2, py2, radius * 0.08, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                ctx.restore();
+            }
+
+            // Round end overlay
+            if (gamePhase === 'roundEnd' && localRoundWinner) {
+                const winner = localPlayers[localRoundWinner];
+                ctx.save();
+                ctx.fillStyle = 'rgba(0,0,0,0.5)';
+                ctx.fillRect(0, 0, arenaSize, arenaSize);
+                ctx.fillStyle = '#fff';
+                const fontSize = arenaSize * 0.06;
+                ctx.font = 'bold ' + fontSize + 'px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText((winner?.name || 'Someone') + ' wins the round!', arenaSize / 2, arenaSize / 2);
+                ctx.restore();
+            }
+        }
+
+        // ────────────────────────────────────────
+        // INPUT HANDLING
+        // ────────────────────────────────────────
+        function getCanvasPos(e) {
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = arenaSize / rect.width;
+            const scaleY = arenaSize / rect.height;
+            let clientX, clientY;
+            if (e.touches && e.touches.length > 0) {
+                clientX = e.touches[0].clientX;
+                clientY = e.touches[0].clientY;
+            } else if (e.changedTouches && e.changedTouches.length > 0) {
+                clientX = e.changedTouches[0].clientX;
+                clientY = e.changedTouches[0].clientY;
+            } else {
+                clientX = e.clientX;
+                clientY = e.clientY;
+            }
+            return {
+                x: (clientX - rect.left) * scaleX,
+                y: (clientY - rect.top) * scaleY,
+            };
+        }
+
+        function handleDragStart(e) {
+            if (gamePhase !== 'playing') return;
+            if (!myPlayerId || !localPlayers[myPlayerId]?.alive) return;
+            const pos = getCanvasPos(e);
+            dragActive = true;
+            dragStartX = pos.x;
+            dragStartY = pos.y;
+            dragCurrentX = pos.x;
+            dragCurrentY = pos.y;
+            e.preventDefault();
+        }
+
+        function handleDragMove(e) {
+            if (!dragActive) return;
+            const pos = getCanvasPos(e);
+            dragCurrentX = pos.x;
+            dragCurrentY = pos.y;
+            e.preventDefault();
+        }
+
+        function handleDragEnd(e) {
+            if (!dragActive) return;
+            dragActive = false;
+            const pos = e.changedTouches ? getCanvasPos(e) : { x: dragCurrentX, y: dragCurrentY };
+            dragCurrentX = pos.x;
+            dragCurrentY = pos.y;
+
+            if (!myPlayerId || !localPlayers[myPlayerId]?.alive) return;
+            if (gamePhase !== 'playing') return;
+
+            const p = localPlayers[myPlayerId];
+            // Check dual-condition cooldown
+            const now = Date.now();
+            const isCarrier = myPlayerId === localBomb.carrierId;
+            const lockoutTime = (isCarrier ? CONFIG.CARRIER_LOCKOUT : CONFIG.MIN_LOCKOUT) * 1000;
+            const timeSinceLastDash = now - lastDashTime;
+            const currentSpeed = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
+
+            if (timeSinceLastDash < lockoutTime) return; // Still in lockout
+            if (currentSpeed > CONFIG.NEAR_ZERO_VELOCITY_THRESHOLD) return; // Still moving
+
+            // Calculate dash
+            const dragDx = dragCurrentX - dragStartX;
+            const dragDy = dragCurrentY - dragStartY;
+            const dragDist = Math.sqrt(dragDx * dragDx + dragDy * dragDy);
+            const maxDrag = CONFIG.MAX_DRAG_RADIUS_RATIO * arenaSize;
+            const cappedDist = Math.min(dragDist, maxDrag);
+            if (cappedDist < 2) return; // Too small
+
+            const power = cappedDist / maxDrag;
+            // Dash direction is OPPOSITE to drag
+            const dashDx = -dragDx / dragDist;
+            const dashDy = -dragDy / dragDist;
+
+            // Apply locally immediately
+            const maxSpeed = arenaSize * CONFIG.DASH_SPEED_SCALAR;
+            const speed = power * maxSpeed;
+            p.vx = dashDx * speed;
+            p.vy = dashDy * speed;
+            lastDashTime = now;
+            lastProcessedDashTimestamp = now;
+
+            if (!hasDashedOnce) {
+                hasDashedOnce = true;
+                tutorialOverlay.classList.add('hidden');
+            }
+
+            // Send dash command to Firebase for host
+            if (myPlayerRef && !isHost) {
+                const cmdRef = ref(db, '/rooms/' + roomCode + '/players/' + myPlayerId + '/dashCommand');
+                set(cmdRef, {
+                    dx: dashDx,
+                    dy: dashDy,
+                    power: power,
+                    timestamp: now,
+                });
+            } else if (isHost) {
+                pendingDashCommand = {
+                    dx: dashDx,
+                    dy: dashDy,
+                    power: power,
+                };
+            }
+
+            e.preventDefault();
+        }
+
+        // Canvas event listeners
+        canvas.addEventListener('mousedown', handleDragStart);
+        canvas.addEventListener('mousemove', handleDragMove);
+        canvas.addEventListener('mouseup', handleDragEnd);
+        canvas.addEventListener('mouseleave', handleDragEnd);
+        canvas.addEventListener('touchstart', handleDragStart, { passive: false });
+        canvas.addEventListener('touchmove', handleDragMove, { passive: false });
+        canvas.addEventListener('touchend', handleDragEnd, { passive: false });
+        canvas.addEventListener('touchcancel', handleDragEnd, { passive: false });
+
+        // Prevent scrolling on canvas
+        canvas.addEventListener('touchstart', function(e) { e.preventDefault(); }, { passive: false });
+        canvas.addEventListener('touchmove', function(e) { e.preventDefault(); }, { passive: false });
+
+        // ────────────────────────────────────────
+        // FIREBASE DASH COMMAND LISTENER (for host to read remote commands)
+        // ────────────────────────────────────────
+        function setupDashCommandListener() {
+            if (!roomCode) return;
+            const playersRef = ref(db, '/rooms/' + roomCode + '/players');
+            onValue(playersRef, (snapshot) => {
+                const data = snapshot.val();
+                if (!data || !isHost) return;
+                for (const pid of Object.keys(data)) {
+                    if (pid === myPlayerId) continue;
+                    const pdata = data[pid];
+                    if (pdata && pdata.dashCommand && pdata.dashCommand.timestamp) {
+                        const cmd = pdata.dashCommand;
+                        const lp = localPlayers[pid];
+                        if (lp && lp.alive && cmd.timestamp > (lp._lastDashProcessed || 0)) {
+                            // Check cooldown for this remote player
+                            const isCarrier = pid === localBomb.carrierId;
+                            const lockoutTime = (isCarrier ? CONFIG.CARRIER_LOCKOUT : CONFIG.MIN_LOCKOUT) * 1000;
+                            const timeSinceLast = Date.now() - (lp._lastDashTime || 0);
+                            const speed = Math.sqrt(lp.vx * lp.vx + lp.vy * lp.vy);
+                            if (timeSinceLast >= lockoutTime && speed <= CONFIG.NEAR_ZERO_VELOCITY_THRESHOLD) {
+                                applyDash(pid, cmd.dx, cmd.dy, cmd.power);
+                                lp._lastDashTime = Date.now();
+                            }
+                            lp._lastDashProcessed = cmd.timestamp;
+                            // Clear the command
+                            set(ref(db, '/rooms/' + roomCode + '/players/' + pid + '/dashCommand'), null);
+                        }
+                    }
+                }
+            });
+        }
+
+        // ────────────────────────────────────────
+        // UI EVENT HANDLERS
+        // ────────────────────────────────────────
+        createBtn.addEventListener('click', async () => {
+            createBtn.disabled = true;
+            joinBtn.disabled = true;
+            lobbyStatus.textContent = 'Creating room...';
+            try {
+                await createRoom();
+                setupDashCommandListener();
+                lobbyOverlay.classList.add('hidden');
+            } catch (err) {
+                console.error('Create room error:', err);
+                lobbyStatus.textContent = 'Error creating room. Check console.';
+                createBtn.disabled = false;
+                joinBtn.disabled = false;
+                roomCode = null;
+            }
+        });
+
+        joinBtn.addEventListener('click', () => {
+            document.getElementById('lobbyMain').classList.add('hidden');
+            document.getElementById('lobbyRoom').classList.remove('hidden');
+            roomCodeInput.value = '';
+            joinError.classList.add('hidden');
+            roomCodeInput.focus();
+        });
+
+        cancelJoinBtn.addEventListener('click', () => {
+            document.getElementById('lobbyMain').classList.remove('hidden');
+            document.getElementById('lobbyRoom').classList.add('hidden');
+            joinError.classList.add('hidden');
+        });
+
+        joinConfirmBtn.addEventListener('click', async () => {
+            const code = roomCodeInput.value.trim();
+            if (!/^\d{4}$/.test(code)) {
+                joinError.textContent = 'Enter a 4-digit room code.';
+                joinError.classList.remove('hidden');
+                return;
+            }
+            joinConfirmBtn.disabled = true;
+            cancelJoinBtn.disabled = true;
+            joinError.classList.add('hidden');
+            lobbyStatus.textContent = 'Joining room...';
+            try {
+                const success = await joinRoom(code);
+                if (success) {
+                    setupDashCommandListener();
+                } else {
+                    joinConfirmBtn.disabled = false;
+                    cancelJoinBtn.disabled = false;
+                }
+            } catch (err) {
+                console.error('Join error:', err);
+                joinError.textContent = 'Error joining room.';
+                joinError.classList.remove('hidden');
+                joinConfirmBtn.disabled = false;
+                cancelJoinBtn.disabled = false;
+            }
+        });
+
+        roomCodeInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                joinConfirmBtn.click();
+            }
+        });
+
+        startBtn.addEventListener('click', () => {
+            if (isHost && gamePhase === 'lobby') {
+                hostStartGame();
+            }
+        });
+
+        playAgainBtn.addEventListener('click', () => {
+            winnerOverlay.classList.add('hidden');
+            if (isHost) {
+                hostResetToLobby();
+            }
+        });
+
+        // ────────────────────────────────────────
+        // INITIALIZATION
+        // ───────────────────────────────────────
+
+        // Handle auth state
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                myPlayerId = user.uid;
+                if (roomCode && !myPlayerRef) {
+                    myPlayerRef = ref(db, '/rooms/' + roomCode + '/players/' + myPlayerId);
+                }
+            }
+        });
+
+        // Handle page unload
+        window.addEventListener('beforeunload', () => {
+            if (myPlayerRef && roomCode) {
+                set(ref(db, '/rooms/' + roomCode + '/players/' + myPlayerId + '/connected'), false);
+            }
+            if (hostSyncInterval) clearInterval(hostSyncInterval);
+        });
+
+        // Handle visibility change (reconnect logic)
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible' && roomCode && myPlayerId && myPlayerRef) {
+                set(ref(db, '/rooms/' + roomCode + '/players/' + myPlayerId + '/connected'), true);
+            }
+        });
+
+        init();
+        console.log('🎮 Corner Rush initialized!');
+        console.log('   Arena size:', arenaSize, 'px');
+        console.log('   Config block at top of JS is ready for tweaking.');
+    </script>
+
+    <style>
+        :root {
+            --bg: #0d0f13;
+            --surface: #1a1d25;
+            --text: #e2e8f0;
+            --accent: #ff5e3a;
+            --accent2: #4da6ff;
+            --border: #2d3340;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: var(--bg);
+            font-family: 'Segoe UI', 'Inter', system-ui, -apple-system, sans-serif;
+            color: var(--text);
+            -webkit-tap-highlight-color: transparent;
+            -webkit-user-select: none;
+            user-select: none;
+            -webkit-touch-callout: none;
+            touch-action: manipulation;
+        }
+
+        #app {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            height: 100%;
+            min-height: 100vh;
+            min-height: 100dvh;
+        }
+
+        #hud {
+            width: 100%;
+            max-width: 900px;
+            padding: 8px 16px;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 10px;
+            font-size: 14px;
+            z-index: 10;
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            flex-shrink: 0;
+        }
+        #hud>span {
+            white-space: nowrap;
+        }
+        #hudRoomCode {
+            font-weight: bold;
+            color: var(--accent2);
+            font-size: 15px;
+        }
+        #hudScores {
+            flex: 1;
+            min-width: 120px;
+            text-align: center;
+            font-weight: 600;
+        }
+        #hudStatus {
+            color: #aab;
+            font-size: 13px;
+        }
+        #hostBadge {
+            background: var(--accent);
+            color: #fff;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: bold;
+            letter-spacing: 0.5px;
+        }
+        .hidden {
+            display: none !important;
+        }
+
+        #arenaWrapper {
+            position: relative;
+            flex-shrink: 0;
+            box-shadow: 0 0 40px rgba(0, 0, 0, 0.5), 0 0 8px rgba(255, 255, 255, 0.05);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        #gameCanvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            cursor: crosshair;
+            touch-action: none;
+        }
+
+        /* Overlays */
+        .overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.75);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
+        }
+        .overlay-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 28px 24px;
+            text-align: center;
+            max-width: 420px;
+            width: 90%;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+        }
+        .overlay-card h2 {
+            font-size: 22px;
+            margin-bottom: 6px;
+        }
+        .overlay-card h3 {
+            font-size: 16px;
+            color: #aab;
+            margin-bottom: 16px;
+            font-weight: 400;
+        }
+        .overlay-card p {
+            font-size: 14px;
+            color: #99a;
+            margin-bottom: 12px;
+        }
+        .overlay-card input {
+            width: 100%;
+            padding: 12px;
+            font-size: 22px;
+            text-align: center;
+            letter-spacing: 8px;
+            border: 2px solid var(--border);
+            border-radius: 10px;
+            background: var(--bg);
+            color: #fff;
+            margin-bottom: 10px;
+            outline: none;
+        }
+        .overlay-card input:focus {
+            border-color: var(--accent2);
+        }
+        .btn {
+            display: inline-block;
+            padding: 12px 28px;
+            border-radius: 10px;
+            border: none;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            margin: 4px;
+            transition: all 0.15s;
+            letter-spacing: 0.3px;
+        }
+        .btn:active {
+            transform: scale(0.96);
+        }
+        .btn-primary {
+            background: var(--accent);
+            color: #fff;
+        }
+        .btn-primary:hover {
+            background: #ff6b4a;
+        }
+        .btn-secondary {
+            background: var(--accent2);
+            color: #fff;
+        }
+        .btn-secondary:hover {
+            background: #6bb8ff;
+        }
+        .btn-ghost {
+            background: transparent;
+            color: #aab;
+            border: 1px solid var(--border);
+        }
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+        #joinError {
+            color: #ff5555;
+            font-size: 13px;
+            margin-top: 4px;
+        }
+        #playerList {
+            text-align: left;
+            font-size: 13px;
+            max-height: 150px;
+            overflow-y: auto;
+            margin: 8px 0;
+        }
+        #lobbyStatus {
+            font-size: 12px;
+            color: #8a8;
+            margin-top: 6px;
+        }
+        #roomDisplay {
+            font-weight: bold;
+            font-size: 16px;
+            color: var(--accent2);
+            margin-bottom: 6px;
+        }
+        #tutorialOverlay {
+            pointer-events: none;
+            background: transparent;
+            align-items: flex-end;
+            justify-content: center;
+            padding-bottom: 40px;
+        }
+        #tutorialText {
+            background: rgba(0, 0, 0, 0.8);
+            color: #fff;
+            padding: 10px 22px;
+            border-radius: 20px;
+            font-size: 15px;
+            letter-spacing: 0.3px;
+            animation: fadeInOut 4s ease-in-out forwards;
+        }
+        @keyframes fadeInOut {
+            0% {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            15% {
+                opacity: 1;
+                transform: translateY(0);
+            }
+            75% {
+                opacity: 1;
+            }
+            100% {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+        }
+        #winnerText {
+            font-size: 24px;
+            font-weight: bold;
+            color: #ffd700;
+        }
+        #winnerSub {
+            color: #ccc;
+            margin-bottom: 12px;
+        }
+
+        /* Responsive */
+        @media (max-width: 600px) {
+            #hud {
+                font-size: 11px;
+                padding: 6px 10px;
+                gap: 6px;
+            }
+            #hudRoomCode {
+                font-size: 13px;
+            }
+            .overlay-card {
+                padding: 18px 14px;
+            }
+            .btn {
+                padding: 10px 18px;
+                font-size: 13px;
+            }
+            #tutorialText {
+                font-size: 13px;
+                padding: 8px 16px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <!-- HUD -->
+        <div id="hud">
+            <span id="hudRoomCode">Room: ----</span>
+            <span id="hostBadge" class="hidden">HOST</span>
+            <span id="hudScores">Scores</span>
+            <span id="hudStatus">Ready</span>
+        </div>
+
+        <!-- Arena -->
+        <div id="arenaWrapper">
+            <canvas id="gameCanvas"></canvas>
+        </div>
+
+        <!-- Lobby Overlay -->
+        <div id="lobbyOverlay" class="overlay">
+            <div class="overlay-card">
+                <div id="lobbyMain">
+                    <h2>🎯 Corner Rush</h2>
+                    <h3>Hot Potato · 2-4 Players</h3>
+                    <p>Drag to slingshot · Pass the bomb · Last one standing wins!</p>
+                    <button id="createBtn" class="btn btn-primary">✨ Create Room</button>
+                    <button id="joinBtn" class="btn btn-secondary">🔗 Join Room</button>
+                </div>
+                <div id="lobbyRoom" class="hidden">
+                    <h3>Join a Room</h3>
+                    <input type="text" id="roomCodeInput" inputmode="numeric" pattern="[0-9]*" maxlength="4" placeholder="0000">
+                    <div id="joinError" class="hidden"></div>
+                    <button id="joinConfirmBtn" class="btn btn-primary">Join</button>
+                    <button id="cancelJoinBtn" class="btn btn-ghost">Back</button>
+                </div>
+                <div id="roomDisplay" style="margin-top:10px;"></div>
+                <div id="playerList"></div>
+                <div id="lobbyStatus">Initializing...</div>
+                <button id="startBtn" class="btn btn-primary hidden" style="margin-top:8px;">🚀 Start Game</button>
+            </div>
+        </div>
+
+        <!-- Tutorial -->
+        <div id="tutorialOverlay" class="overlay hidden">
+            <span id="tutorialText">🐍 Drag to slingshot in the opposite direction!</span>
+        </div>
+
+        <!-- Winner -->
+        <div id="winnerOverlay" class="overlay hidden">
+            <div class="overlay-card">
+                <div id="winnerText">🏆 Winner!</div>
+                <div id="winnerSub"></div>
+                <button id="playAgainBtn" class="btn btn-primary">Play Again</button>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
