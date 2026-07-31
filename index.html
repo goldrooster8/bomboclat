@@ -124,7 +124,6 @@
       display: flex; align-items: center; justify-content: center;
       box-shadow: 0 2px 4px rgba(0,0,0,.3);
     }
-    .mini-card.hidden-card { background: linear-gradient(135deg, var(--accent2), #311b5e); color: transparent; }
 
     /* Center table */
     #table-center {
@@ -172,12 +171,12 @@
       font-size: clamp(0.65rem, 1.1vmin, 0.85rem);
     }
 
-    /* Drawn card zone (pinned to right side) */
+    /* Drawn card zone (Pinned right) */
     #drawn-zone {
       position: absolute; top: 50%; right: 5vw;
       transform: translateY(-50%);
       z-index: 50; display: none; flex-direction: column;
-      align-items: center; gap: 0.5rem;
+      align-items: center; gap: .5rem;
     }
     #drawn-zone.visible { display: flex; }
     .action-buttons { display: flex; flex-wrap: wrap; gap: .4rem; justify-content: center; max-width: clamp(200px, 30vw, 320px); }
@@ -365,6 +364,7 @@
     <table class="results-table" id="round-results-table"></table>
     <p id="round-coin-msg"></p>
     <p style="color:var(--muted);font-size:.9rem" id="round-next-msg">Shop opening…</p>
+    <button class="btn btn-gold" id="btn-force-shop" style="display:none; margin-top:1rem;">Open Shop Now (Host)</button>
   </div>
 </div>
 
@@ -712,6 +712,9 @@ function onRoomUpdate(snap) {
 
   if (gs.phase === 'roundEnd') {
     renderRoundOverlay();
+    if (isHost && !roundEndProcessed) {
+      processRoundEnd();
+    }
   }
 
   checkTurnTimeout(gs);
@@ -774,7 +777,6 @@ function renderGame() {
     const isActive = pid === currentId;
     const isMe = pid === myId;
     const pile = p.pile || [];
-    const showCards = isMe || pile.length <= 3;
 
     const slot = document.createElement('div');
     slot.className = 'player-slot' + (isActive ? ' active-turn' : '');
@@ -782,18 +784,9 @@ function renderGame() {
     slot.style.top = y + 'px';
     slot.style.transform = `translate(-50%, -50%) rotate(${-rotDeg}deg)`;
 
-    let cardsHtml = '';
-    if (pile.length === 0) {
-      cardsHtml = '<span style="color:var(--muted);font-size:.75rem">empty</span>';
-    } else if (showCards) {
-      cardsHtml = pile.map(c => `<div class="mini-card">${c}</div>`).join('');
-    } else {
-      cardsHtml = pile.map((_, idx) =>
-        idx === pile.length - 1
-          ? `<div class="mini-card">${pile[pile.length - 1]}</div>`
-          : `<div class="mini-card hidden-card">?</div>`
-      ).join('');
-    }
+    const cardsHtml = pile.length === 0
+      ? '<span style="color:var(--muted);font-size:.75rem">empty</span>'
+      : pile.map(c => `<div class="mini-card">${c}</div>`).join('');
 
     const mod = gs.tempTopModifier?.[pid];
     const modBadge = mod ? ` (+${mod})` : '';
@@ -1316,7 +1309,6 @@ async function endTurn(playerId) {
   const top = pile.length ? pile[pile.length - 1] : 0;
 
   const deckEmpty = !(gs.deck && gs.deck.length > 0);
-
   const hasTargets = Object.entries(roomData.players || {}).some(([id, p]) => id !== myId && p.pile?.length > 0);
 
   if (
@@ -1403,7 +1395,7 @@ async function advanceTurn(roundEnding) {
   }, async (err, committed, snap) => {
     if (!committed) return;
     const gs = snap.val();
-    if (gs.phase === 'roundEnd') {
+    if (gs.phase === 'roundEnd' && isHost) {
       await processRoundEnd();
     }
   });
@@ -1482,17 +1474,22 @@ async function processRoundEnd() {
         await roomRef.child('gameState/phase').set('ended');
         await roomRef.child('gameState/winner').set(findGrandWinner(totalScores));
       } else {
-        shopAdvanceTriggered = false;
-        roundEndProcessed = false;
-        await roomRef.child('gameState').update({
-          phase: 'shop',
-          shopOpen: true,
-          shopDeadline: Date.now() + SHOP_SECONDS * 1000,
-          shopReady: {},
-        });
+        await openShopHost();
       }
     }, 4000);
   }
+}
+
+async function openShopHost() {
+  if (!isHost) return;
+  shopAdvanceTriggered = false;
+  roundEndProcessed = false;
+  await roomRef.child('gameState').update({
+    phase: 'shop',
+    shopOpen: true,
+    shopDeadline: Date.now() + SHOP_SECONDS * 1000,
+    shopReady: {},
+  });
 }
 
 function findGrandWinner(totalScores) {
@@ -1530,6 +1527,14 @@ function renderRoundOverlay() {
 
   const isFinal = gs.round >= gs.totalRounds;
   document.getElementById('round-next-msg').textContent = isFinal ? 'Calculating final scores…' : 'Shop opening…';
+
+  const forceBtn = document.getElementById('btn-force-shop');
+  if (isHost && !isFinal) {
+    forceBtn.style.display = 'inline-block';
+    forceBtn.onclick = () => openShopHost();
+  } else {
+    forceBtn.style.display = 'none';
+  }
 
   if (gs.phase !== 'roundEnd') overlay.classList.remove('visible');
 }
