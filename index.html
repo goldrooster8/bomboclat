@@ -1,1339 +1,1743 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-  <title>Corner Rush</title>
-  <!--
-    Firebase setup:
-    1. Create a Firebase project.
-    2. Enable Anonymous Authentication in Authentication > Sign-in method.
-    3. Create a Realtime Database.
-    4. Replace the firebaseConfig placeholder below in the JavaScript.
-    5. For early testing, use permissive database rules. Tighten rules before public release.
-  -->
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hardstuck Gauntlet</title>
   <style>
     :root {
-      color-scheme: dark;
-      --bg: #111318;
-      --panel: #1c2028;
-      --panel-2: #242a34;
-      --text: #f4f7fb;
-      --muted: #aab3c2;
-      --line: #3a4352;
-      --accent: #71d4ff;
-      --danger: #ff6377;
-      --good: #80e18d;
-      --warn: #ffd166;
+      --bg: #0f0f1a;
+      --surface: #1a1a2e;
+      --surface2: #252545;
+      --accent: #e94560;
+      --accent2: #533483;
+      --gold: #ffd700;
+      --text: #eee;
+      --muted: #888;
+      --card-w: clamp(64px, 7vmin, 110px);
+      --card-h: clamp(88px, 9.5vmin, 150px);
+      --green: #4caf50;
+      --blue: #2196f3;
     }
-
-    * { box-sizing: border-box; }
-
-    html, body {
-      margin: 0;
-      min-height: 100%;
-      background: radial-gradient(circle at top, #202737 0, var(--bg) 58%);
-      color: var(--text);
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      overflow: hidden;
-    }
-
+    * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
-      min-height: 100dvh;
-      display: flex;
-      justify-content: center;
-    }
-
-    button, input {
-      font: inherit;
-    }
-
-    button {
-      border: 1px solid var(--line);
-      background: var(--panel-2);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg);
       color: var(--text);
-      padding: 0.65rem 0.9rem;
-      border-radius: 8px;
-      cursor: pointer;
+      min-height: 100vh;
+      overflow-x: hidden;
     }
+    .screen { display: none; min-height: 100vh; }
+    .screen.active { display: flex; flex-direction: column; align-items: center; justify-content: center; }
 
-    button.primary {
-      background: var(--accent);
-      border-color: var(--accent);
-      color: #071016;
-      font-weight: 700;
-    }
-
-    button:disabled {
-      opacity: 0.45;
-      cursor: not-allowed;
-    }
-
-    input {
-      width: 100%;
-      min-width: 0;
-      border: 1px solid var(--line);
-      background: #10141b;
-      color: var(--text);
-      padding: 0.65rem 0.75rem;
-      border-radius: 8px;
-      text-transform: uppercase;
-    }
-
-    .app {
-      width: min(100vw, 1240px);
-      height: 100dvh;
-      display: grid;
-      grid-template-rows: auto minmax(0, 1fr) auto;
-      gap: clamp(8px, 1.5vmin, 16px);
-      padding: clamp(8px, 1.8vmin, 18px);
-    }
-
-    .hud {
-      display: grid;
-      grid-template-columns: minmax(190px, 0.8fr) minmax(220px, 1.4fr) minmax(180px, 0.8fr);
-      gap: 10px;
-      align-items: stretch;
-    }
-
+    /* ── Lobby ── */
+    #lobby-screen { gap: 1.5rem; padding: 2rem; }
+    .logo { font-size: clamp(2rem, 5vw, 3.5rem); font-weight: 800; color: var(--accent); letter-spacing: 2px; }
+    .subtitle { color: var(--muted); margin-bottom: 1rem; font-size: clamp(0.9rem, 2vw, 1.2rem); }
     .panel {
-      border: 1px solid var(--line);
-      background: color-mix(in srgb, var(--panel) 92%, transparent);
-      border-radius: 8px;
-      padding: 10px;
+      background: var(--surface);
+      border-radius: 12px;
+      padding: clamp(1.2rem, 3vw, 2.5rem);
+      width: 90vw; max-width: 440px;
+      box-shadow: 0 8px 32px rgba(0,0,0,.4);
+    }
+    input[type=text] {
+      width: 100%; padding: .75rem 1rem; border-radius: 8px;
+      border: 2px solid var(--surface2); background: var(--bg);
+      color: var(--text); font-size: 1rem; margin-bottom: 1rem;
+    }
+    input:focus { outline: none; border-color: var(--accent); }
+    .btn {
+      display: inline-block; padding: .75rem 1.5rem; border: none; border-radius: 8px;
+      font-size: clamp(0.9rem, 1.5vw, 1.1rem); font-weight: 600; cursor: pointer; transition: all .2s;
+      background: var(--accent); color: #fff; width: 100%; margin-top: .5rem;
+    }
+    .btn:hover { filter: brightness(1.15); transform: translateY(-1px); }
+    .btn:disabled { opacity: .4; cursor: not-allowed; transform: none; }
+    .btn-secondary { background: var(--surface2); }
+    .btn-green { background: var(--green); }
+    .btn-gold { background: #b8860b; color: #fff; }
+    .btn-sm { padding: .4rem .8rem; font-size: clamp(0.75rem, 1.2vw, 0.9rem); width: auto; margin: .2rem; }
+    .divider { text-align: center; color: var(--muted); margin: 1rem 0; }
+
+    /* ── Waiting room ── */
+    #waiting-screen { gap: 1rem; padding: 2rem; }
+    .room-code-display {
+      font-size: clamp(1.8rem, 4vw, 3rem); font-weight: 700; letter-spacing: 6px;
+      color: var(--gold); cursor: pointer;
+    }
+    .player-list { list-style: none; width: 90vw; max-width: 440px; }
+    .player-list li {
+      background: var(--surface2); padding: .75rem 1rem; border-radius: 8px;
+      margin-bottom: .5rem; display: flex; justify-content: space-between;
+    }
+    .rounds-select { margin: 1rem 0; }
+    .rounds-select label { margin-right: .5rem; }
+    .rounds-select select {
+      padding: .5rem; border-radius: 6px; background: var(--bg);
+      color: var(--text); border: 1px solid var(--surface2);
     }
 
-    .room-line, .status-line {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      min-width: 0;
+    /* ── Game screen ── */
+    #game-screen { position: relative; width: 100vw; height: 100vh; overflow: hidden; }
+    .top-bar {
+      position: absolute; top: 0; left: 0; right: 0; z-index: 100;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: clamp(0.5rem, 1.5vh, 1rem) clamp(0.75rem, 2vw, 2rem); background: rgba(15,15,26,.92);
+      backdrop-filter: blur(8px); border-bottom: 1px solid var(--surface2);
     }
-
-    .label {
-      color: var(--muted);
-      font-size: 0.78rem;
-      line-height: 1.2;
+    .top-bar-left { display: flex; align-items: center; gap: clamp(0.5rem, 1.5vw, 1.5rem); }
+    .room-code-sm {
+      font-weight: 700; color: var(--gold); letter-spacing: 3px; cursor: pointer;
+      font-size: clamp(0.8rem, 1.5vw, 1rem);
     }
-
-    .value {
-      font-weight: 800;
-      font-size: clamp(1rem, 2.2vmin, 1.55rem);
-      letter-spacing: 0.08em;
-      white-space: nowrap;
+    .status-text { font-size: clamp(0.85rem, 1.5vw, 1.1rem); }
+    .timer {
+      font-size: clamp(1.2rem, 2.5vw, 1.8rem); font-weight: 700; font-variant-numeric: tabular-nums;
+      min-width: 3ch; text-align: center;
     }
+    .timer.urgent { color: var(--accent); animation: pulse .5s infinite alternate; }
+    @keyframes pulse { from { opacity: 1; } to { opacity: .5; } }
+    .round-info { color: var(--gold); font-size: clamp(0.75rem, 1.3vw, 0.95rem); }
+    .coin-display { color: var(--gold); font-weight: 600; font-size: clamp(0.85rem, 1.5vw, 1.1rem); }
 
-    .scores {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 8px;
+    /* Player ring */
+    #player-ring {
+      position: absolute; top: 50%; left: 50%;
+      width: 0; height: 0;
+      transition: transform .6s ease;
     }
-
-    .score {
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 8px;
-      min-width: 0;
-      background: rgba(255,255,255,0.035);
-    }
-
-    .score .name {
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      font-size: 0.85rem;
-      color: var(--muted);
-    }
-
-    .score .points {
-      font-weight: 800;
-      font-size: 1.25rem;
-    }
-
-    .score.me {
-      border-color: var(--accent);
-    }
-
-    .stage {
-      min-height: 0;
-      display: grid;
-      place-items: center;
-      position: relative;
-    }
-
-    .arena-wrap {
-      position: relative;
-      width: min(100%, calc(100dvh - 178px), 980px);
-      aspect-ratio: 1 / 1;
-      min-width: min(100%, 260px);
-    }
-
-    canvas {
-      width: 100%;
-      height: 100%;
-      display: block;
-      border: clamp(4px, 0.8vmin, 8px) solid #d9e4f3;
-      border-radius: 0;
-      background: #181d25;
-      touch-action: none;
-      user-select: none;
-    }
-
-    .corner-tag {
+    .player-slot {
       position: absolute;
-      color: var(--muted);
-      font-size: clamp(0.68rem, 1.8vmin, 0.88rem);
-      max-width: 38%;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      pointer-events: none;
+      transform: translate(-50%, -50%);
+      width: clamp(140px, 18vmin, 220px); text-align: center;
+      transition: transform .6s ease;
+    }
+    .player-slot.active-turn .player-name { color: var(--accent); }
+    .player-name { font-weight: 700; font-size: clamp(0.8rem, 1.3vmin, 1.1rem); margin-bottom: 4px; }
+    .player-meta { font-size: clamp(0.7rem, 1vmin, 0.85rem); color: var(--muted); margin-bottom: 6px; }
+    .player-cards { display: flex; justify-content: center; gap: 4px; flex-wrap: wrap; width: 100%; }
+    .mini-card {
+      width: clamp(28px, 3.5vmin, 44px); height: clamp(38px, 4.8vmin, 60px); border-radius: 4px;
+      background: linear-gradient(135deg, #fff 0%, #ddd 100%);
+      color: #222; font-size: clamp(0.65rem, 1.1vmin, 0.9rem); font-weight: 700;
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 2px 4px rgba(0,0,0,.3);
+    }
+    .mini-card.hidden-card { background: linear-gradient(135deg, var(--accent2), #311b5e); color: transparent; }
+
+    /* Center table */
+    #table-center {
+      position: absolute; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      display: flex; flex-direction: column; align-items: center; gap: clamp(0.5rem, 1.5vmin, 1.2rem);
+      z-index: 10;
+    }
+    .draw-zone { text-align: center; }
+    .deck-stack {
+      width: var(--card-w); height: var(--card-h);
+      background: linear-gradient(135deg, var(--accent2), #1a0a3e);
+      border-radius: 8px; border: 2px solid #666;
+      display: flex; align-items: center; justify-content: center;
+      font-size: clamp(0.8rem, 1.5vmin, 1.1rem); color: var(--muted); margin: 0 auto .5rem;
+      box-shadow: 0 4px 12px rgba(0,0,0,.4);
+    }
+    .discard-row { display: flex; gap: clamp(0.5rem, 1.5vmin, 1.2rem); }
+    .discard-pile {
+      text-align: center; min-width: var(--card-w);
+    }
+    .discard-pile .card {
+      margin: 0 auto .4rem;
+    }
+    .pile-label { font-size: clamp(0.65rem, 1vmin, 0.8rem); color: var(--muted); }
+
+    /* Cards */
+    .card {
+      width: var(--card-w); height: var(--card-h);
+      background: linear-gradient(145deg, #fff 0%, #e8e8e8 50%, #ccc 100%);
+      border-radius: 8px; border: 2px solid #aaa;
+      display: flex; align-items: center; justify-content: center;
+      font-size: clamp(1.1rem, 2.2vmin, 1.8rem); font-weight: 800; color: #222;
+      box-shadow: 0 4px 12px rgba(0,0,0,.35);
+      transition: transform .3s, box-shadow .3s;
+    }
+    .card.red { color: var(--accent); }
+    .card.drawn-highlight { animation: cardPop .4s ease; box-shadow: 0 0 20px var(--gold); }
+    @keyframes cardPop {
+      0% { transform: scale(.5) rotate(-10deg); opacity: 0; }
+      100% { transform: scale(1) rotate(0); opacity: 1; }
+    }
+    .card.empty-slot {
+      background: transparent; border: 2px dashed #444; color: var(--muted);
+      font-size: clamp(0.65rem, 1.1vmin, 0.85rem);
     }
 
-    .tag-0 { left: 0; top: -1.35rem; }
-    .tag-1 { right: 0; top: -1.35rem; text-align: right; }
-    .tag-2 { left: 0; bottom: -1.35rem; }
-    .tag-3 { right: 0; bottom: -1.35rem; text-align: right; }
+    /* Drawn card zone (beside current player) */
+    #drawn-zone {
+      position: absolute; z-index: 50;
+      display: none; flex-direction: column; align-items: center; gap: .5rem;
+    }
+    #drawn-zone.visible { display: flex; }
+    .action-buttons { display: flex; flex-wrap: wrap; gap: .4rem; justify-content: center; max-width: clamp(200px, 30vw, 320px); }
 
+    /* Ability bar */
+    #ability-bar {
+      position: absolute; bottom: 1rem; left: 50%; transform: translateX(-50%);
+      display: flex; flex-wrap: wrap; gap: .4rem; justify-content: center;
+      z-index: 80; max-width: 90vw;
+    }
+
+    /* Risk pick zone */
+    #risk-zone {
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      z-index: 90; display: none; flex-direction: column; align-items: center; gap: 1rem;
+      background: rgba(15,15,26,.95); padding: clamp(1rem, 3vw, 2.5rem); border-radius: 16px;
+      border: 2px solid var(--accent); width: 90vw; max-width: 480px;
+    }
+    #risk-zone.visible { display: flex; }
+
+    /* Steal / Sabotage modals */
+    .modal-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,.7);
+      display: none; align-items: center; justify-content: center; z-index: 200;
+    }
+    .modal-overlay.visible { display: flex; }
+    .modal-box {
+      background: var(--surface); border-radius: 16px; padding: 2rem;
+      max-width: 420px; width: 90vw; text-align: center;
+    }
+    .modal-box h3 { margin-bottom: 1rem; color: var(--accent); }
+    .target-list { display: flex; flex-direction: column; gap: .5rem; margin: 1rem 0; }
+    .flip-select { max-height: 200px; overflow-y: auto; }
+
+    /* Overlays */
     .overlay {
-      position: absolute;
-      inset: 0;
-      display: grid;
-      place-items: center;
-      pointer-events: none;
-      text-align: center;
-      padding: 20px;
+      position: fixed; inset: 0; background: rgba(0,0,0,.85);
+      display: none; align-items: center; justify-content: center; z-index: 300;
     }
-
-    .overlay-card {
-      pointer-events: auto;
-      width: min(520px, 100%);
-      border: 1px solid var(--line);
-      background: rgba(20, 24, 31, 0.94);
-      border-radius: 8px;
-      padding: clamp(14px, 3vmin, 24px);
-      box-shadow: 0 16px 48px rgba(0,0,0,0.35);
+    .overlay.visible { display: flex; }
+    .overlay-content {
+      background: var(--surface); border-radius: 16px; padding: 2.5rem;
+      max-width: 520px; width: 90vw; text-align: center;
+      box-shadow: 0 16px 48px rgba(0,0,0,.5);
     }
-
-    .overlay-card h1 {
-      margin: 0 0 8px;
-      font-size: clamp(1.6rem, 5vmin, 3rem);
+    .overlay-content h2 { color: var(--accent); margin-bottom: 1rem; font-size: 1.8rem; }
+    .results-table { width: 100%; margin: 1rem 0; border-collapse: collapse; }
+    .results-table th, .results-table td {
+      padding: .5rem; border-bottom: 1px solid var(--surface2); text-align: left;
     }
+    .results-table .winner-row { color: var(--gold); font-weight: 700; }
 
-    .overlay-card p {
-      margin: 8px 0;
-      color: var(--muted);
+    /* Shop */
+    #shop-screen { padding: clamp(1rem, 3vw, 2.5rem); gap: 1rem; width: 90vw; max-width: 800px; margin: 0 auto; }
+    #shop-screen.active { display: block; }
+    .shop-header {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 1.5rem;
     }
-
-    .lobby-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
-      margin-top: 14px;
+    .shop-timer { font-size: 1.2rem; font-weight: 700; }
+    .upgrade-grid { display: grid; gap: .75rem; }
+    .upgrade-card {
+      background: var(--surface2); border-radius: 10px; padding: 1rem;
+      display: flex; justify-content: space-between; align-items: center; gap: 1rem;
     }
+    .upgrade-info { flex: 1; }
+    .upgrade-name { font-weight: 700; color: var(--gold); }
+    .upgrade-desc { font-size: .85rem; color: var(--muted); margin-top: .25rem; }
+    .upgrade-cost { font-weight: 700; color: var(--gold); white-space: nowrap; }
+    .upgrade-owned { color: var(--green); font-size: .85rem; }
+    .shop-footer { margin-top: 1.5rem; text-align: center; }
+    .ready-status { color: var(--muted); margin-top: .5rem; font-size: .9rem; }
 
-    .join-row {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-      gap: 8px;
-      margin-top: 10px;
+    .toast {
+      position: fixed; bottom: 2rem; left: 50%; transform: translateX(-50%);
+      background: var(--surface2); padding: .75rem 1.5rem; border-radius: 8px;
+      z-index: 500; opacity: 0; transition: opacity .3s; pointer-events: none;
     }
-
-    .bottom {
-      display: grid;
-      grid-template-columns: 1fr auto;
-      gap: 10px;
-      align-items: center;
-    }
-
-    .hint {
-      color: var(--muted);
-      font-size: 0.88rem;
-    }
-
-    .pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      padding: 0.35rem 0.65rem;
-      color: var(--muted);
-      background: rgba(255,255,255,0.035);
-      font-size: 0.82rem;
-      white-space: nowrap;
-    }
-
-    .dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: var(--danger);
-    }
-
-    .dot.ok { background: var(--good); }
-
-    @media (max-width: 760px) {
-      .app {
-        grid-template-rows: auto minmax(0, 1fr) auto;
-      }
-
-      .hud {
-        grid-template-columns: 1fr;
-      }
-
-      .scores {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-      }
-
-      .arena-wrap {
-        width: min(100%, calc(100dvh - 318px));
-      }
-
-      .bottom {
-        grid-template-columns: 1fr;
-      }
-
-      .lobby-grid {
-        grid-template-columns: 1fr;
-      }
-    }
-
-    @media (max-width: 420px) {
-      .app {
-        padding: 6px;
-      }
-
-      .panel {
-        padding: 8px;
-      }
-
-      .scores {
-        gap: 6px;
-      }
-
-      .score {
-        padding: 6px;
-      }
-    }
+    .toast.show { opacity: 1; }
   </style>
 </head>
 <body>
-  <main class="app">
-    <section class="hud">
-      <div class="panel">
-        <div class="room-line">
-          <div>
-            <div class="label">Room</div>
-            <div class="value" id="roomCode">----</div>
-          </div>
-          <div class="pill"><span class="dot" id="connDot"></span><span id="connText">Offline</span></div>
-        </div>
-      </div>
-      <div class="panel">
-        <div class="scores" id="scores"></div>
-      </div>
-      <div class="panel">
-        <div class="status-line">
-          <div>
-            <div class="label">Role</div>
-            <div id="roleText">Not joined</div>
-          </div>
-          <button id="startBtn" class="primary" disabled>Start</button>
-        </div>
-      </div>
-    </section>
 
-    <section class="stage">
-      <div class="arena-wrap">
-        <canvas id="game" aria-label="Corner Rush square arena"></canvas>
-        <div class="corner-tag tag-0" id="tag0"></div>
-        <div class="corner-tag tag-1" id="tag1"></div>
-        <div class="corner-tag tag-2" id="tag2"></div>
-        <div class="corner-tag tag-3" id="tag3"></div>
-        <div class="overlay" id="overlay">
-          <div class="overlay-card">
-            <h1>Corner Rush</h1>
-            <p>Online hot-potato dashing for 2-4 players.</p>
-            <input id="nameInput" maxlength="14" placeholder="Player name" autocomplete="nickname">
-            <div class="lobby-grid">
-              <button id="createBtn" class="primary">Create room</button>
-              <div class="join-row">
-                <input id="joinInput" inputmode="numeric" maxlength="4" placeholder="1234">
-                <button id="joinBtn">Join</button>
-              </div>
-            </div>
-            <p id="overlayMsg">Drag inside the square, release, and dash in the opposite direction.</p>
-          </div>
-        </div>
-      </div>
-    </section>
+<!-- ═══════════════ LOBBY ═══════════════ -->
+<div id="lobby-screen" class="screen active">
+  <div class="logo">HARDSTUCK</div>
+  <div class="subtitle">Gauntlet Edition</div>
+  <div class="panel">
+    <input type="text" id="player-name" placeholder="Your name" maxlength="16">
+    <button class="btn" id="btn-create">Create Room</button>
+    <div class="divider">— or —</div>
+    <input type="text" id="room-code-input" placeholder="Room code (4 letters)" maxlength="4" style="text-transform:uppercase">
+    <button class="btn btn-secondary" id="btn-join">Join Room</button>
+  </div>
+</div>
 
-    <section class="bottom">
-      <div class="hint" id="hint">First load hint: drag to slingshot in the opposite direction. Longer drag means stronger dash.</div>
-      <div class="pill" id="roundText">Waiting for room</div>
-    </section>
-  </main>
+<!-- ═══════════════ WAITING ROOM ═══════════════ -->
+<div id="waiting-screen" class="screen">
+  <div class="logo" style="font-size:1.5rem">Waiting Room</div>
+  <div class="room-code-display" id="waiting-room-code" title="Click to copy"></div>
+  <ul class="player-list" id="waiting-players"></ul>
+  <div class="rounds-select panel" id="rounds-panel">
+    <label for="total-rounds">Gauntlet rounds:</label>
+    <select id="total-rounds">
+      <option value="3" selected>3 Rounds</option>
+      <option value="5">5 Rounds</option>
+    </select>
+  </div>
+  <button class="btn" id="btn-start" style="max-width:400px" disabled>Start Gauntlet</button>
+  <button class="btn btn-secondary" id="btn-leave-waiting" style="max-width:400px">Leave</button>
+</div>
 
-  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-database-compat.js"></script>
-  <script>
-    // ======================== TWEAKABLE GAME BALANCE CONFIG ========================
-    const CONFIG = {
-      FUSE_DURATION: 12,
-      MIN_LOCKOUT: 0.5,
-      CARRIER_LOCKOUT_BONUS: 0.3,
-      MAX_DRAG_RADIUS_RATIO: 0.2,
-      PLAYER_FRICTION: 0.955,
-      BOX_FRICTION: 0.96,
-      BOX_ANGULAR_FRICTION: 0.91,
-      NEAR_ZERO_VELOCITY_THRESHOLD: 5,
-      BOX_SIZE_RATIO: 0.06,
-      PLAYER_RADIUS_RATIO: 0.025,
-      ROUNDS_TO_WIN: 3,
-      SYNC_RATE: 30,
-      MAX_DASH_SPEED_MULTIPLIER: 1.4,
-      BOX_CLUSTER_INSET_RATIO: 0.18,
-      PLAYER_BOX_BRAKE: 0.42,
-      BOX_PUSH_MULTIPLIER: 0.48,
-      BOX_PLAYER_SEPARATION_SHARE: 0.35,
-      BOX_TORQUE_MULTIPLIER: 10,
-      MAX_PLAYER_SPEED_RATIO_PER_SECOND: 4.2,
-      MAX_BOX_SPEED_RATIO_PER_SECOND: 2.2,
-      MAX_BOX_ANGULAR_SPEED: 9,
-      PHYSICS_SUBSTEPS: 5,
-      COLLISION_PASSES: 3,
-      PLAYER_RESTITUTION: 0.72,
-      BOX_RESTITUTION: 0.25,
-      PASS_GRACE_SECONDS: 0.45,
-      COUNTDOWN_SECONDS: 3,
-      ROUND_END_DELAY: 2.25,
-      HOST_HEARTBEAT_MS: 1500,
-      HOST_STALE_MS: 5500,
-      INTERPOLATION: 0.28,
-      CLIENT_PREDICTION_MS: 900,
-      CLIENT_PREDICTION_RECONCILE_DISTANCE: 0.035
+<!-- ═══════════════ GAME ═══════════════ -->
+<div id="game-screen" class="screen">
+  <div class="top-bar">
+    <div class="top-bar-left">
+      <span class="room-code-sm" id="game-room-code" title="Click to copy"></span>
+      <span class="round-info" id="round-info"></span>
+      <span class="coin-display" id="coin-display"></span>
+    </div>
+    <span class="status-text" id="status-text">Waiting…</span>
+    <div style="display:flex;align-items:center;gap:1rem">
+      <span class="timer" id="timer">30</span>
+      <button class="btn btn-sm btn-secondary" id="btn-leave-game">Leave</button>
+    </div>
+  </div>
+
+  <div id="player-ring"></div>
+
+  <div id="table-center">
+    <div class="draw-zone">
+      <div class="deck-stack" id="deck-count">0</div>
+      <button class="btn btn-sm" id="btn-draw">Draw</button>
+    </div>
+    <div class="discard-row" id="discard-row"></div>
+  </div>
+
+  <div id="drawn-zone">
+    <div class="card drawn-highlight" id="drawn-card-el">?</div>
+    <div class="action-buttons" id="action-buttons"></div>
+  </div>
+
+  <div id="ability-bar"></div>
+
+  <div id="risk-zone">
+    <h3>Risk It! Pick a card:</h3>
+    <div style="display:flex;gap:1.5rem" id="risk-cards"></div>
+  </div>
+</div>
+
+<!-- Steal modal -->
+<div class="modal-overlay" id="steal-modal">
+  <div class="modal-box">
+    <h3>Thief's Reflex</h3>
+    <p>Steal the top card from an opponent:</p>
+    <div class="target-list" id="steal-targets"></div>
+    <button class="btn btn-secondary btn-sm" id="btn-skip-steal">Skip</button>
+  </div>
+</div>
+
+<!-- Sabotage modal -->
+<div class="modal-overlay" id="sabotage-modal">
+  <div class="modal-box">
+    <h3>Sabotage</h3>
+    <p>Increase an opponent's effective top card by 15:</p>
+    <div class="target-list" id="sabotage-targets"></div>
+    <button class="btn btn-secondary btn-sm" id="btn-skip-sabotage">Skip</button>
+  </div>
+</div>
+
+<!-- Flip digit modal -->
+<div class="modal-overlay" id="flip-modal">
+  <div class="modal-box">
+    <h3>Digit Flip</h3>
+    <p>Select a 2-digit card from your pile:</p>
+    <div class="target-list flip-select" id="flip-targets"></div>
+    <button class="btn btn-secondary btn-sm" id="btn-cancel-flip">Cancel</button>
+  </div>
+</div>
+
+<!-- Round results overlay -->
+<div class="overlay" id="round-overlay">
+  <div class="overlay-content">
+    <h2 id="round-overlay-title">Round Complete</h2>
+    <table class="results-table" id="round-results-table"></table>
+    <p id="round-coin-msg"></p>
+    <p style="color:var(--muted);font-size:.9rem" id="round-next-msg">Shop opening…</p>
+  </div>
+</div>
+
+<!-- Grand finale overlay -->
+<div class="overlay" id="finale-overlay">
+  <div class="overlay-content">
+    <h2>Grand Finale!</h2>
+    <table class="results-table" id="finale-table"></table>
+    <button class="btn" id="btn-back-lobby">Back to Lobby</button>
+  </div>
+</div>
+
+<!-- ═══════════════ SHOP ═══════════════ -->
+<div id="shop-screen" class="screen">
+  <div class="shop-header">
+    <h2 style="color:var(--gold)">Shop</h2>
+    <div>
+      <span class="coin-display" id="shop-coins">0 coins</span>
+      &nbsp;|&nbsp;
+      <span class="shop-timer" id="shop-timer">60</span>s
+    </div>
+  </div>
+  <div class="upgrade-grid" id="upgrade-grid"></div>
+  <div class="shop-footer">
+    <button class="btn btn-green" id="btn-shop-ready">Ready</button>
+    <div class="ready-status" id="ready-status"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+
+<script>
+const firebaseConfig = {
+  apiKey: "AIzaSyANEQA7aOltYtY-MHYwEpz17zzhBLppDBc",
+  authDomain: "hardstuck-game.firebaseapp.com",
+  databaseURL: "https://hardstuck-game-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "hardstuck-game",
+  storageBucket: "hardstuck-game.firebasestorage.app",
+  messagingSenderId: "1006298740610",
+  appId: "1:1006298740610:web:5af1dec86271607eb3019b"
+};
+
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.database();
+
+const UPGRADES = [
+  { id: 'overcharge',   name: 'Overcharge',    cost: 3, desc: 'First 2 turns each round: treat drawn card as +20 for Keep check.' },
+  { id: 'reroll',       name: 'Reroll',        cost: 3, desc: 'Once per round free reroll after draw; extra rerolls cost 1 coin.' },
+  { id: 'risk_it',      name: 'Risk It',       cost: 4, desc: 'Once per round: 1/7 chance to draw 2 cards and pick the highest.' },
+  { id: 'destroy',      name: 'Destroy',       cost: 4, desc: 'Once per round: permanently remove a drawn card from the game.' },
+  { id: 'digit_flip',   name: 'Digit Flip',    cost: 4, desc: 'Once per round: reverse digits of a 2-digit card in your pile.' },
+  { id: 'cull_weak',    name: 'Cull the Weak', cost: 5, desc: 'Once per round (4+ cards): destroy 2 random cards; top = 2nd lowest.' },
+  { id: 'small_start',  name: 'Small Start',   cost: 3, desc: 'Start each round with a random card under 40 in your pile.' },
+  { id: 'mystery_box',  name: 'Mystery Box',   cost: 2, desc: 'Does absolutely nothing. Mystery!' },
+  { id: 'thief_reflex', name: "Thief's Reflex", cost: 5, desc: 'Once per round: if top ≥ 80, steal an opponent\'s top card after your turn.' },
+  { id: 'sabotage',     name: 'Sabotage',      cost: 4, desc: 'Once per round: +15 effective top on an opponent until their turn ends.' },
+];
+
+const TURN_SECONDS = 30;
+const SHOP_SECONDS = 60;
+
+let myId = null;
+let roomCode = null;
+let roomRef = null;
+let roomData = null;
+let timerInterval = null;
+let shopTimerInterval = null;
+let isHost = false;
+let shopAdvanceTriggered = false;
+let roundEndProcessed = false;
+let lastSabotageTurnIndex = -1;
+
+function normalizeDiscards(discards) {
+  if (!Array.isArray(discards)) return [[], [], []];
+  return [0, 1, 2].map(i => Array.isArray(discards[i]) ? discards[i] : []);
+}
+
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function generateRoomCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+  let code = '';
+  for (let i = 0; i < 4; i++) code += chars[Math.floor(Math.random() * chars.length)];
+  return code;
+}
+
+function deckSizeForPlayers(n) {
+  if (n <= 2) return 16;
+  if (n === 3) return 28;
+  if (n === 4) return 40;
+  return 50;
+}
+
+function buildDeck(size) {
+  const all = shuffle(Array.from({ length: 100 }, (_, i) => i + 1));
+  return all.slice(0, size);
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2500);
+}
+
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+
+function copyRoomCode(code) {
+  navigator.clipboard.writeText(code).then(() => showToast('Room code copied!'));
+}
+
+function hasUpgrade(player, id) {
+  return (player?.upgrades || []).includes(id);
+}
+
+function defaultRoundState() {
+  return {
+    overchargeTurnsUsed: 0,
+    freeRerollUsed: false,
+    riskItUsed: false,
+    destroyUsed: false,
+    flipUsed: false,
+    cullUsed: false,
+    stealUsed: false,
+    sabotageUsed: false,
+  };
+}
+
+function getEffectiveTop(playerId, gs) {
+  const player = roomData?.players?.[playerId];
+  if (!player || !player.pile || player.pile.length === 0) return 0;
+  let top = player.pile[player.pile.length - 1];
+  if (gs?.tempTopModifier && gs.tempTopModifier[playerId]) {
+    top += gs.tempTopModifier[playerId];
+  }
+  return top;
+}
+
+function canKeep(playerId, drawnCard, gs) {
+  const player = roomData?.players?.[playerId];
+  if (!player) return false;
+  const pile = player.pile || [];
+  if (pile.length === 0) return true;
+  let effectiveDrawn = drawnCard;
+  const rs = player.roundState || {};
+  if (hasUpgrade(player, 'overcharge') && (rs.overchargeTurnsUsed || 0) < 2) {
+    effectiveDrawn += 20;
+  }
+  return effectiveDrawn > getEffectiveTop(playerId, gs);
+}
+
+function reverseDigits(n) {
+  if (n < 10 || n > 99) return n;
+  return parseInt(String(n).split('').reverse().join(''), 10);
+}
+
+function getCurrentPlayerId(gs) {
+  if (!gs) return null;
+  const order = gs.turnOrder || roomData?.turnOrder || [];
+  return order[gs.currentPlayerIndex || 0];
+}
+
+function amCurrentPlayer(gs) {
+  return getCurrentPlayerId(gs) === myId;
+}
+
+auth.signInAnonymously().catch(err => {
+  console.error('Auth failed:', err);
+  showToast('Failed to connect. Refresh the page.');
+});
+
+auth.onAuthStateChanged(user => {
+  if (user) {
+    myId = user.uid;
+  }
+});
+
+document.getElementById('btn-create').onclick = async () => {
+  const name = document.getElementById('player-name').value.trim();
+  if (!name) return showToast('Enter your name');
+  if (!myId) return showToast('Connecting… try again');
+  roomCode = generateRoomCode();
+  roomRef = db.ref('rooms/' + roomCode);
+  const snap = await roomRef.once('value');
+  if (snap.exists()) return showToast('Code collision, try again');
+  await roomRef.set({
+    creator: myId,
+    turnOrder: [myId],
+    players: {
+      [myId]: { name, pile: [], coins: 0, upgrades: [], roundScores: [], roundState: defaultRoundState() }
+    },
+    gameState: { started: false, phase: 'lobby' }
+  });
+  enterWaitingRoom();
+};
+
+document.getElementById('btn-join').onclick = async () => {
+  const name = document.getElementById('player-name').value.trim();
+  const code = document.getElementById('room-code-input').value.trim().toUpperCase();
+  if (!name) return showToast('Enter your name');
+  if (code.length !== 4) return showToast('Enter a 4-letter code');
+  if (!myId) return showToast('Connecting… try again');
+  roomCode = code;
+  roomRef = db.ref('rooms/' + roomCode);
+  const snap = await roomRef.once('value');
+  if (!snap.exists()) return showToast('Room not found');
+  const data = snap.val();
+  if (data.gameState && data.gameState.started) return showToast('Game already started');
+  await roomRef.child('players/' + myId).set({
+    name, pile: [], coins: 0, upgrades: [], roundScores: [], roundState: defaultRoundState()
+  });
+  await roomRef.child('turnOrder').transaction(order => {
+    if (!order) order = [];
+    if (!order.includes(myId)) order.push(myId);
+    return order;
+  });
+  enterWaitingRoom();
+};
+
+function enterWaitingRoom() {
+  showScreen('waiting-screen');
+  document.getElementById('waiting-room-code').textContent = roomCode;
+  document.getElementById('waiting-room-code').onclick = () => copyRoomCode(roomCode);
+  roomRef.on('value', onRoomUpdate);
+}
+
+document.getElementById('btn-leave-waiting').onclick = leaveRoom;
+document.getElementById('btn-leave-game').onclick = leaveRoom;
+
+async function leaveRoom() {
+  if (roomRef && myId) {
+    await roomRef.child('players/' + myId).remove();
+    await roomRef.child('turnOrder').transaction(order => {
+      if (!order) return order;
+      return order.filter(id => id !== myId);
+    });
+    roomRef.off('value', onRoomUpdate);
+  }
+  roomRef = null;
+  roomCode = null;
+  roomData = null;
+  clearInterval(timerInterval);
+  clearInterval(shopTimerInterval);
+  showScreen('lobby-screen');
+}
+
+document.getElementById('btn-start').onclick = async () => {
+  if (!isHost) return;
+  const totalRounds = parseInt(document.getElementById('total-rounds').value, 10);
+  const playerIds = Object.keys(roomData.players);
+  const shuffledOrder = shuffle(playerIds);
+  const size = deckSizeForPlayers(playerIds.length);
+  let deck = buildDeck(size);
+
+  const players = { ...roomData.players };
+  for (const pid of playerIds) {
+    players[pid] = {
+      ...players[pid],
+      pile: [],
+      roundState: defaultRoundState(),
+      roundScores: players[pid].roundScores || [],
     };
-    // ==============================================================================
+    if (hasUpgrade(players[pid], 'small_start')) {
+      const lowCards = deck.filter(c => c < 40);
+      if (lowCards.length > 0) {
+        const pick = lowCards[Math.floor(Math.random() * lowCards.length)];
+        deck = deck.filter(c => c !== pick);
+        players[pid].pile = [pick];
+      }
+    }
+  }
 
-    const firebaseConfig = {
-      apiKey: "AIzaSyBfOKGz06urUqutCnDUfy6P2hMswoBifq8",
-      authDomain: "bomb-game-782c2.firebaseapp.com",
-      databaseURL: "https://bomb-game-782c2-default-rtdb.asia-southeast1.firebasedatabase.app",
-      projectId: "bomb-game-782c2",
-      storageBucket: "bomb-game-782c2.firebasestorage.app",
-      messagingSenderId: "984947565972",
-      appId: "1:984947565972:web:486661db2f7dab317bdb81"
+  await roomRef.update({
+    turnOrder: shuffledOrder,
+    players,
+    gameState: {
+      started: true,
+      phase: 'playing',
+      round: 1,
+      totalRounds,
+      turnOrder: shuffledOrder,
+      deck,
+      discards: [[], [], []],
+      currentPlayerIndex: 0,
+      turnPhase: 'action',
+      drawnCard: null,
+      turnDeadline: Date.now() + TURN_SECONDS * 1000,
+      winner: null,
+      shopOpen: false,
+      shopReady: {},
+      roundResults: {},
+      totalScores: {},
+      riskCards: null,
+      tempTopModifier: {},
+      pendingSteal: null,
+      pendingSabotage: null,
+    }
+  });
+};
+
+function onRoomUpdate(snap) {
+  if (!snap.exists()) { leaveRoom(); return; }
+  roomData = snap.val();
+  isHost = roomData.creator === myId;
+  const gs = roomData.gameState || {};
+
+  if (!gs.started) {
+    renderWaitingRoom();
+    return;
+  }
+
+  if (gs.phase === 'shop') {
+    roundEndProcessed = false;
+    renderShop();
+    return;
+  }
+
+  if (gs.phase === 'playing') {
+    roundEndProcessed = false;
+  }
+
+  if (gs.phase === 'ended') {
+    renderFinale();
+    return;
+  }
+
+  showScreen('game-screen');
+  renderGame();
+
+  if (gs.phase === 'roundEnd') {
+    renderRoundOverlay();
+  }
+
+  checkTurnTimeout(gs);
+  checkShopTimeout(gs);
+}
+
+function renderWaitingRoom() {
+  showScreen('waiting-screen');
+  const players = roomData.players || {};
+  const list = document.getElementById('waiting-players');
+  list.innerHTML = Object.entries(players).map(([id, p]) =>
+    `<li><span>${escapeHtml(p.name)}</span>${id === roomData.creator ? '<span style="color:var(--gold)">Host</span>' : ''}</li>`
+  ).join('');
+  document.getElementById('btn-start').disabled = !isHost || Object.keys(players).length < 2;
+  document.getElementById('rounds-panel').style.display = isHost ? 'block' : 'none';
+}
+
+function escapeHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function renderGame() {
+  const gs = roomData.gameState;
+  const players = roomData.players || {};
+  const turnOrder = gs.turnOrder || roomData.turnOrder || Object.keys(players);
+  const myIndex = turnOrder.indexOf(myId);
+  const n = turnOrder.length;
+  const currentId = getCurrentPlayerId(gs);
+  const me = players[myId];
+
+  document.getElementById('game-room-code').textContent = roomCode;
+  document.getElementById('game-room-code').onclick = () => copyRoomCode(roomCode);
+  document.getElementById('round-info').textContent = `Round ${gs.round}/${gs.totalRounds}`;
+  document.getElementById('coin-display').textContent = `🪙 ${me?.coins || 0}`;
+
+  const curName = players[currentId]?.name || '?';
+  let statusMsg = `${curName}'s turn`;
+  if (gs.turnPhase === 'deciding') statusMsg = `${curName} — Keep or Discard?`;
+  if (gs.turnPhase === 'risking') statusMsg = `${curName} — Risk It! Pick a card`;
+  if (gs.pendingSteal === myId) statusMsg = 'Your steal window!';
+  if (gs.pendingSabotage === myId) statusMsg = 'Choose sabotage target';
+  document.getElementById('status-text').textContent = statusMsg;
+
+  updateTimerDisplay(gs.turnDeadline);
+
+  const ring = document.getElementById('player-ring');
+  const radius = Math.min(window.innerWidth, window.innerHeight) * 0.35;
+  const rotDeg = myIndex >= 0 ? (180 - myIndex * (360 / n)) : 0;
+  ring.style.transform = `translate(-50%, -50%) rotate(${rotDeg}deg)`;
+
+  ring.innerHTML = '';
+  turnOrder.forEach((pid, i) => {
+    const angle = -90 + i * (360 / n);
+    const rad = angle * Math.PI / 180;
+    const x = Math.cos(rad) * radius;
+    const y = Math.sin(rad) * radius;
+    const p = players[pid] || {};
+    const isActive = pid === currentId;
+    const isMe = pid === myId;
+    const pile = p.pile || [];
+    const showCards = isMe || pile.length <= 3;
+
+    const slot = document.createElement('div');
+    slot.className = 'player-slot' + (isActive ? ' active-turn' : '');
+    slot.style.left = x + 'px';
+    slot.style.top = y + 'px';
+    slot.style.transform = `translate(-50%, -50%) rotate(${-rotDeg}deg)`;
+
+    let cardsHtml = '';
+    if (pile.length === 0) {
+      cardsHtml = '<span style="color:var(--muted);font-size:.75rem">empty</span>';
+    } else if (showCards) {
+      cardsHtml = pile.map(c => `<div class="mini-card">${c}</div>`).join('');
+    } else {
+      cardsHtml = pile.map((_, idx) =>
+        idx === pile.length - 1
+          ? `<div class="mini-card">${pile[pile.length - 1]}</div>`
+          : `<div class="mini-card hidden-card">?</div>`
+      ).join('');
+    }
+
+    const mod = gs.tempTopModifier?.[pid];
+    const modBadge = mod ? ` (+${mod})` : '';
+
+    slot.innerHTML = `
+      <div class="player-name">${escapeHtml(p.name || '')}${isMe ? ' (you)' : ''}</div>
+      <div class="player-meta">${pile.length} cards · top: ${pile.length ? pile[pile.length-1] : 0}${modBadge}</div>
+      <div class="player-cards">${cardsHtml}</div>
+    `;
+    ring.appendChild(slot);
+  });
+
+  document.getElementById('deck-count').textContent = (gs.deck || []).length;
+  const isMyTurn = amCurrentPlayer(gs);
+  const canAct = isMyTurn && gs.turnPhase === 'action' && gs.phase === 'playing';
+  document.getElementById('btn-draw').disabled = !canAct || (gs.deck || []).length === 0;
+
+  const discardRow = document.getElementById('discard-row');
+  discardRow.innerHTML = '';
+  const discards = normalizeDiscards(gs.discards);
+  discards.forEach((pile, idx) => {
+    const top = pile.length ? pile[pile.length - 1] : null;
+    const div = document.createElement('div');
+    div.className = 'discard-pile';
+    div.innerHTML = `
+      <div class="card ${top && top <= 10 ? 'red' : ''} ${top ? '' : 'empty-slot'}">${top || 'Empty'}</div>
+      <div class="pile-label">Pile ${idx + 1}</div>
+    `;
+    if (canAct && top !== null) {
+      const takeBtn = document.createElement('button');
+      takeBtn.className = 'btn btn-sm btn-secondary';
+      takeBtn.textContent = 'Take';
+      takeBtn.disabled = !canTakeFromDiscard(myId, top, gs);
+      takeBtn.onclick = () => takeFromDiscard(idx);
+      div.appendChild(takeBtn);
+    }
+    discardRow.appendChild(div);
+  });
+
+  document.getElementById('btn-draw').onclick = () => drawCard();
+
+  renderDrawnZone(gs, turnOrder, n, radius, rotDeg);
+  renderAbilityBar(gs);
+  renderRiskZone(gs);
+
+  if (
+    amCurrentPlayer(gs) && gs.turnPhase === 'action' && gs.phase === 'playing' &&
+    !gs.pendingSteal && !gs.drawnCard && gs.pendingSabotage !== myId &&
+    lastSabotageTurnIndex !== gs.currentPlayerIndex
+  ) {
+    const me = roomData.players[myId];
+    if (hasUpgrade(me, 'sabotage') && !(me.roundState?.sabotageUsed)) {
+      lastSabotageTurnIndex = gs.currentPlayerIndex;
+      roomRef.child('gameState/pendingSabotage').set(myId);
+    }
+  }
+
+  renderStealModal(gs);
+  renderSabotageModal(gs);
+}
+
+function canTakeFromDiscard(playerId, card, gs) {
+  const player = roomData?.players?.[playerId];
+  if (!player) return false;
+  const pile = player.pile || [];
+  if (pile.length === 0) return true;
+  return card > getEffectiveTop(playerId, gs);
+}
+
+function renderDrawnZone(gs, turnOrder, n, radius, rotDeg) {
+  const zone = document.getElementById('drawn-zone');
+  const btns = document.getElementById('action-buttons');
+  btns.innerHTML = '';
+
+  if (gs.turnPhase !== 'deciding' || gs.drawnCard === null || !amCurrentPlayer(gs)) {
+    zone.classList.remove('visible');
+    return;
+  }
+
+  zone.classList.add('visible');
+  document.getElementById('drawn-card-el').textContent = gs.drawnCard;
+
+  const curIdx = gs.currentPlayerIndex;
+  const angle = -90 + curIdx * (360 / n);
+  const rad = angle * Math.PI / 180;
+  const x = Math.cos(rad) * (radius + 110);
+  const y = Math.sin(rad) * (radius + 110);
+  zone.style.left = `calc(50% + ${x}px)`;
+  zone.style.top = `calc(50% + ${y}px)`;
+  zone.style.transform = 'translate(-50%, -50%)';
+
+  const me = roomData.players[myId];
+  const canKeepCard = canKeep(myId, gs.drawnCard, gs);
+
+  if (canKeepCard) {
+    btns.appendChild(mkBtn('Keep', 'btn-green', () => keepCard()));
+  }
+
+  if (hasUpgrade(me, 'destroy') && !(me.roundState?.destroyUsed)) {
+    btns.appendChild(mkBtn('Destroy', 'btn-secondary', () => destroyCard()));
+  }
+
+  if (hasUpgrade(me, 'reroll')) {
+    const rs = me.roundState || {};
+    const label = rs.freeRerollUsed ? 'Reroll (1🪙)' : 'Reroll (free)';
+    btns.appendChild(mkBtn(label, 'btn-gold', () => rerollCard()));
+  }
+
+  const discards = normalizeDiscards(gs.discards);
+  const emptyIdx = discards.findIndex(p => p.length === 0);
+  discards.forEach((pile, idx) => {
+    const canDiscardHere = emptyIdx === -1 || emptyIdx === idx;
+    if (canDiscardHere) {
+      btns.appendChild(mkBtn(`Discard → ${idx + 1}`, 'btn-secondary', () => discardCard(idx)));
+    }
+  });
+}
+
+function mkBtn(text, cls, onclick) {
+  const b = document.createElement('button');
+  b.className = 'btn btn-sm ' + cls;
+  b.textContent = text;
+  b.onclick = onclick;
+  return b;
+}
+
+function renderAbilityBar(gs) {
+  const bar = document.getElementById('ability-bar');
+  bar.innerHTML = '';
+  if (!amCurrentPlayer(gs) || gs.turnPhase !== 'action' || gs.phase !== 'playing') return;
+
+  const me = roomData.players[myId];
+  const rs = me.roundState || {};
+  const pile = me.pile || [];
+
+  if (hasUpgrade(me, 'digit_flip') && !rs.flipUsed && pile.some(c => c >= 10 && c <= 99)) {
+    bar.appendChild(mkBtn('Digit Flip', 'btn-gold', () => openFlipModal()));
+  }
+
+  if (hasUpgrade(me, 'cull_weak') && !rs.cullUsed && pile.length >= 4) {
+    bar.appendChild(mkBtn('Cull the Weak', 'btn-gold', () => cullWeak()));
+  }
+}
+
+function renderRiskZone(gs) {
+  const zone = document.getElementById('risk-zone');
+  const cards = document.getElementById('risk-cards');
+  if (gs.turnPhase !== 'risking' || !amCurrentPlayer(gs) || !gs.riskCards) {
+    zone.classList.remove('visible');
+    return;
+  }
+  zone.classList.add('visible');
+  cards.innerHTML = '';
+  gs.riskCards.forEach((card, i) => {
+    const div = document.createElement('div');
+    div.style.textAlign = 'center';
+    div.innerHTML = `<div class="card drawn-highlight">${card}</div>`;
+    const btn = mkBtn('Pick', 'btn-green', () => pickRiskCard(i));
+    div.appendChild(btn);
+    cards.appendChild(div);
+  });
+}
+
+function renderStealModal(gs) {
+  const modal = document.getElementById('steal-modal');
+  if (gs.pendingSteal !== myId) {
+    modal.classList.remove('visible');
+    return;
+  }
+  modal.classList.add('visible');
+  const targets = document.getElementById('steal-targets');
+  targets.innerHTML = '';
+  Object.entries(roomData.players || {}).forEach(([pid, p]) => {
+    if (pid === myId) return;
+    if (!p.pile || p.pile.length === 0) return;
+    const btn = mkBtn(`${p.name} (top: ${p.pile[p.pile.length-1]})`, 'btn-secondary', () => executeSteal(pid));
+    targets.appendChild(btn);
+  });
+}
+
+function renderSabotageModal(gs) {
+  const modal = document.getElementById('sabotage-modal');
+  if (gs.pendingSabotage !== myId) {
+    modal.classList.remove('visible');
+    return;
+  }
+  modal.classList.add('visible');
+  const targets = document.getElementById('sabotage-targets');
+  targets.innerHTML = '';
+  Object.entries(roomData.players || {}).forEach(([pid, p]) => {
+    if (pid === myId) return;
+    const btn = mkBtn(p.name, 'btn-secondary', () => executeSabotage(pid));
+    targets.appendChild(btn);
+  });
+}
+
+document.getElementById('btn-skip-steal').onclick = () => skipSteal();
+document.getElementById('btn-skip-sabotage').onclick = () => skipSabotage();
+document.getElementById('btn-cancel-flip').onclick = () => {
+  document.getElementById('flip-modal').classList.remove('visible');
+};
+
+function openFlipModal() {
+  const me = roomData.players[myId];
+  const pile = me.pile || [];
+  const targets = document.getElementById('flip-targets');
+  targets.innerHTML = '';
+  pile.forEach((card, idx) => {
+    if (card >= 10 && card <= 99) {
+      const flipped = reverseDigits(card);
+      const btn = mkBtn(`${card} → ${flipped}`, 'btn-secondary', () => executeFlip(idx));
+      targets.appendChild(btn);
+    }
+  });
+  document.getElementById('flip-modal').classList.add('visible');
+}
+
+async function drawCard() {
+  const ref = roomRef.child('gameState');
+  await ref.transaction(gs => {
+    if (!gs || gs.phase !== 'playing' || gs.turnPhase !== 'action') return;
+    const order = gs.turnOrder || [];
+    if (order[gs.currentPlayerIndex] !== myId) return;
+    if (!gs.deck || gs.deck.length === 0) return;
+
+    const player = roomData.players[myId];
+    let card = gs.deck.pop();
+
+    if (hasUpgrade(player, 'risk_it') && !(player.roundState?.riskItUsed)) {
+      const roll = Math.floor(Math.random() * 7) + 1;
+      if (roll === 1) {
+        const discards = normalizeDiscards(gs.discards);
+        const emptyIdx = discards.findIndex(p => p.length === 0);
+        const discardIdx = emptyIdx !== -1 ? emptyIdx : 0;
+        discards[discardIdx].push(card);
+        gs.discards = discards;
+
+        if (gs.deck.length < 2) {
+          gs.drawnCard = gs.deck.pop() || null;
+          gs.turnPhase = 'deciding';
+          gs.turnDeadline = Date.now() + TURN_SECONDS * 1000;
+          gs._markRiskUsed = myId;
+          return gs;
+        }
+        const cardA = gs.deck.pop();
+        const cardB = gs.deck.pop();
+        gs.riskCards = [cardA, cardB];
+        gs.turnPhase = 'risking';
+        gs.drawnCard = null;
+        gs._markRiskUsed = myId;
+        gs.turnDeadline = Date.now() + TURN_SECONDS * 1000;
+        return gs;
+      }
+    }
+
+    gs.drawnCard = card;
+    gs.turnPhase = 'deciding';
+    gs.turnDeadline = Date.now() + TURN_SECONDS * 1000;
+    return gs;
+  }, (err, committed, snap) => {
+    if (committed && snap.val()?._markRiskUsed) {
+      roomRef.child('players/' + myId + '/roundState/riskItUsed').set(true);
+      roomRef.child('gameState/_markRiskUsed').remove();
+    }
+  });
+}
+
+async function pickRiskCard(index) {
+  await roomRef.child('gameState').transaction(gs => {
+    if (!gs || gs.turnPhase !== 'risking') return;
+    const order = gs.turnOrder || [];
+    if (order[gs.currentPlayerIndex] !== myId) return;
+    const cards = gs.riskCards;
+    if (!cards) return;
+    const chosen = cards[index];
+    const unchosen = cards[1 - index];
+
+    const discards = normalizeDiscards(gs.discards);
+    const emptyIdx = discards.findIndex(p => p.length === 0);
+    const discardIdx = emptyIdx !== -1 ? emptyIdx : 0;
+    discards[discardIdx].push(unchosen);
+    gs.discards = discards;
+
+    const pile = roomData?.players?.[myId]?.pile ? [...roomData.players[myId].pile] : [];
+    if (pile.length > 0) {
+      pile[pile.length - 1] = chosen;
+    } else {
+      pile.push(chosen);
+    }
+    gs._riskPile = pile;
+    gs.riskCards = null;
+    gs.turnPhase = 'action';
+    gs._endTurn = true;
+    return gs;
+  }, async (err, committed, snap) => {
+    if (!committed) return;
+    const gs = snap.val();
+    if (gs._riskPile) {
+      await roomRef.child('players/' + myId + '/pile').set(gs._riskPile);
+      await roomRef.child('gameState/_riskPile').remove();
+    }
+    if (gs._endTurn) {
+      await roomRef.child('gameState/_endTurn').remove();
+      await endTurn(myId);
+    }
+  });
+}
+
+async function keepCard() {
+  await roomRef.child('gameState').transaction(gs => {
+    if (!gs || gs.turnPhase !== 'deciding') return;
+    const order = gs.turnOrder || [];
+    if (order[gs.currentPlayerIndex] !== myId) return;
+    if (!canKeep(myId, gs.drawnCard, gs)) return;
+    const card = gs.drawnCard;
+    gs.drawnCard = null;
+    gs.turnPhase = 'action';
+    gs._keepCard = card;
+    gs._endTurn = true;
+    return gs;
+  }, async (err, committed, snap) => {
+    if (!committed) return;
+    const gs = snap.val();
+    if (gs._keepCard !== undefined) {
+      await roomRef.child('players/' + myId + '/pile').transaction(pile => {
+        pile = pile || [];
+        pile.push(gs._keepCard);
+        return pile;
+      });
+      const me = roomData.players[myId];
+      if (hasUpgrade(me, 'overcharge')) {
+        await roomRef.child('players/' + myId + '/roundState/overchargeTurnsUsed').transaction(v => (v || 0) + 1);
+      }
+      await roomRef.child('gameState/_keepCard').remove();
+    }
+    if (gs._endTurn) {
+      await roomRef.child('gameState/_endTurn').remove();
+      await endTurn(myId);
+    }
+  });
+}
+
+async function discardCard(pileIdx) {
+  await roomRef.child('gameState').transaction(gs => {
+    if (!gs || gs.turnPhase !== 'deciding') return;
+    const order = gs.turnOrder || [];
+    if (order[gs.currentPlayerIndex] !== myId) return;
+    const card = gs.drawnCard;
+    if (card === null || card === undefined) return;
+
+    const discards = normalizeDiscards(gs.discards);
+    const emptyIdx = discards.findIndex(p => p.length === 0);
+    if (emptyIdx !== -1 && emptyIdx !== pileIdx) return;
+
+    discards[pileIdx].push(card);
+    gs.discards = discards;
+    gs.drawnCard = null;
+    gs.turnPhase = 'action';
+    gs._endTurn = true;
+    return gs;
+  }, async (err, committed, snap) => {
+    if (!committed) return;
+    const gs = snap.val();
+    if (gs._endTurn) {
+      await roomRef.child('gameState/_endTurn').remove();
+      const me = roomData.players[myId];
+      if (hasUpgrade(me, 'overcharge')) {
+        await roomRef.child('players/' + myId + '/roundState/overchargeTurnsUsed').transaction(v => (v || 0) + 1);
+      }
+      await endTurn(myId);
+    }
+  });
+}
+
+async function destroyCard() {
+  await roomRef.child('gameState').transaction(gs => {
+    if (!gs || gs.turnPhase !== 'deciding') return;
+    const order = gs.turnOrder || [];
+    if (order[gs.currentPlayerIndex] !== myId) return;
+    gs.drawnCard = null;
+    gs.turnPhase = 'action';
+    gs._destroyUsed = true;
+    gs._endTurn = true;
+    return gs;
+  }, async (err, committed, snap) => {
+    if (!committed) return;
+    const gs = snap.val();
+    if (gs._destroyUsed) {
+      await roomRef.child('players/' + myId + '/roundState/destroyUsed').set(true);
+      await roomRef.child('players/' + myId + '/roundState/overchargeTurnsUsed').transaction(v => {
+        const me = roomData.players[myId];
+        return hasUpgrade(me, 'overcharge') ? (v || 0) + 1 : v;
+      });
+      await roomRef.child('gameState/_destroyUsed').remove();
+    }
+    if (gs._endTurn) {
+      await roomRef.child('gameState/_endTurn').remove();
+      await endTurn(myId);
+    }
+  });
+}
+
+async function rerollCard() {
+  const me = roomData.players[myId];
+  const rs = me.roundState || {};
+  const needsCoin = rs.freeRerollUsed;
+  if (needsCoin && (me.coins || 0) < 1) {
+    showToast('Not enough coins for reroll');
+    return;
+  }
+
+  await roomRef.child('gameState').transaction(gs => {
+    if (!gs || gs.turnPhase !== 'deciding') return;
+    const order = gs.turnOrder || [];
+    if (order[gs.currentPlayerIndex] !== myId) return;
+    if (!gs.deck || gs.deck.length === 0) return;
+
+    const card = gs.drawnCard;
+    const discards = normalizeDiscards(gs.discards);
+    const emptyIdx = discards.findIndex(p => p.length === 0);
+    const discardIdx = emptyIdx !== -1 ? emptyIdx : 0;
+    discards[discardIdx].push(card);
+    gs.discards = discards;
+
+    gs.drawnCard = gs.deck.pop();
+    gs._rerollUpdate = needsCoin ? 'paid' : 'free';
+    gs.turnDeadline = Date.now() + TURN_SECONDS * 1000;
+    return gs;
+  }, async (err, committed, snap) => {
+    if (!committed) return;
+    const gs = snap.val();
+    if (gs._rerollUpdate === 'free') {
+      await roomRef.child('players/' + myId + '/roundState/freeRerollUsed').set(true);
+    } else if (gs._rerollUpdate === 'paid') {
+      await roomRef.child('players/' + myId + '/coins').transaction(c => (c || 0) - 1);
+    }
+    await roomRef.child('gameState/_rerollUpdate').remove();
+  });
+}
+
+async function takeFromDiscard(pileIdx) {
+  await roomRef.child('gameState').transaction(gs => {
+    if (!gs || gs.phase !== 'playing' || gs.turnPhase !== 'action') return;
+    const order = gs.turnOrder || [];
+    if (order[gs.currentPlayerIndex] !== myId) return;
+    const discards = normalizeDiscards(gs.discards);
+    const pile = discards[pileIdx];
+    if (!pile || pile.length === 0) return;
+    const card = pile.pop();
+    if (!canTakeFromDiscard(myId, card, gs)) {
+      pile.push(card);
+      return;
+    }
+    gs.discards = discards;
+    gs._takeCard = card;
+    gs._endTurn = true;
+    return gs;
+  }, async (err, committed, snap) => {
+    if (!committed) return;
+    const gs = snap.val();
+    if (gs._takeCard !== undefined) {
+      await roomRef.child('players/' + myId + '/pile').transaction(pile => {
+        pile = pile || [];
+        pile.push(gs._takeCard);
+        return pile;
+      });
+      await roomRef.child('players/' + myId + '/roundState/overchargeTurnsUsed').transaction(v => {
+        const me = roomData.players[myId];
+        return hasUpgrade(me, 'overcharge') ? (v || 0) + 1 : v;
+      });
+      await roomRef.child('gameState/_takeCard').remove();
+    }
+    if (gs._endTurn) {
+      await roomRef.child('gameState/_endTurn').remove();
+      await endTurn(myId);
+    }
+  });
+}
+
+async function cullWeak() {
+  await roomRef.child('players/' + myId).transaction(player => {
+    if (!player) return;
+    const pile = [...(player.pile || [])];
+    if (pile.length < 4) return;
+    if (player.roundState?.cullUsed) return;
+
+    const idx1 = Math.floor(Math.random() * pile.length);
+    pile.splice(idx1, 1);
+    const idx2 = Math.floor(Math.random() * pile.length);
+    pile.splice(idx2, 1);
+
+    pile.sort((a, b) => a - b);
+    if (pile.length >= 2) {
+      const secondLowest = pile[1];
+      pile.splice(1, 1);
+      pile.push(secondLowest);
+    }
+    player.pile = pile;
+    player.roundState = player.roundState || defaultRoundState();
+    player.roundState.cullUsed = true;
+    return player;
+  });
+  showToast('Cull the Weak activated!');
+}
+
+async function executeFlip(cardIdx) {
+  document.getElementById('flip-modal').classList.remove('visible');
+  await roomRef.child('players/' + myId).transaction(player => {
+    if (!player || player.roundState?.flipUsed) return;
+    const pile = [...(player.pile || [])];
+    if (cardIdx >= pile.length) return;
+    const card = pile[cardIdx];
+    if (card < 10 || card > 99) return;
+    const flipped = reverseDigits(card);
+    pile.splice(cardIdx, 1);
+    if (pile.length > 0) pile[pile.length - 1] = flipped;
+    else pile.push(flipped);
+    player.pile = pile;
+    player.roundState = player.roundState || defaultRoundState();
+    player.roundState.flipUsed = true;
+    return player;
+  });
+}
+
+async function endTurn(playerId) {
+  const gs = roomData.gameState;
+  const player = roomData.players[playerId];
+  const pile = player?.pile || [];
+  const top = pile.length ? pile[pile.length - 1] : 0;
+
+  const deckEmpty = !(gs.deck && gs.deck.length > 0);
+
+  if (
+    playerId === myId &&
+    hasUpgrade(player, 'thief_reflex') &&
+    !(player.roundState?.stealUsed) &&
+    top >= 80 &&
+    !deckEmpty
+  ) {
+    await roomRef.child('gameState/pendingSteal').set(myId);
+    return;
+  }
+
+  await advanceTurn(deckEmpty);
+}
+
+async function skipSteal() {
+  document.getElementById('steal-modal').classList.remove('visible');
+  await roomRef.child('players/' + myId + '/roundState/stealUsed').set(true);
+  await roomRef.child('gameState/pendingSteal').remove();
+  await advanceTurn(false);
+}
+
+async function executeSteal(targetId) {
+  document.getElementById('steal-modal').classList.remove('visible');
+  const target = roomData.players[targetId];
+  if (!target?.pile?.length) return skipSteal();
+
+  const stolen = target.pile[target.pile.length - 1];
+  await roomRef.child('players/' + targetId + '/pile').transaction(pile => {
+    pile = pile || [];
+    pile.pop();
+    return pile;
+  });
+  await roomRef.child('players/' + myId + '/pile').transaction(pile => {
+    pile = pile || [];
+    if (pile.length > 0) pile[pile.length - 1] = stolen;
+    else pile.push(stolen);
+    return pile;
+  });
+  await roomRef.child('players/' + myId + '/roundState/stealUsed').set(true);
+  await roomRef.child('gameState/pendingSteal').remove();
+  await advanceTurn(false);
+}
+
+async function skipSabotage() {
+  document.getElementById('sabotage-modal').classList.remove('visible');
+  await roomRef.child('players/' + myId + '/roundState/sabotageUsed').set(true);
+  await roomRef.child('gameState/pendingSabotage').remove();
+}
+
+async function executeSabotage(targetId) {
+  document.getElementById('sabotage-modal').classList.remove('visible');
+  await roomRef.child('gameState/tempTopModifier/' + targetId).set(15);
+  await roomRef.child('players/' + myId + '/roundState/sabotageUsed').set(true);
+  await roomRef.child('gameState/pendingSabotage').remove();
+}
+
+async function advanceTurn(roundEnding) {
+  await roomRef.child('gameState').transaction(gs => {
+    if (!gs) return;
+
+    const prevId = getCurrentPlayerId(gs);
+    if (gs.tempTopModifier && gs.tempTopModifier[prevId]) {
+      delete gs.tempTopModifier[prevId];
+    }
+
+    if (roundEnding || gs.phase === 'roundEnd') {
+      gs.phase = 'roundEnd';
+      gs.turnPhase = 'action';
+      gs.drawnCard = null;
+      return gs;
+    }
+
+    const order = gs.turnOrder || [];
+    gs.currentPlayerIndex = (gs.currentPlayerIndex + 1) % order.length;
+    gs.turnPhase = 'action';
+    gs.drawnCard = null;
+    gs.riskCards = null;
+    gs.turnDeadline = Date.now() + TURN_SECONDS * 1000;
+
+    return gs;
+  }, async (err, committed, snap) => {
+    if (!committed) return;
+    const gs = snap.val();
+    if (gs.phase === 'roundEnd') {
+      await processRoundEnd();
+    }
+  });
+}
+
+async function processRoundEnd() {
+  if (roundEndProcessed) return;
+  roundEndProcessed = true;
+  const gs = roomData.gameState;
+  const players = roomData.players || {};
+
+  let maxCards = -1;
+  let winners = [];
+  const piles = {};
+  const tops = {};
+
+  Object.entries(players).forEach(([pid, p]) => {
+    const pile = p.pile || [];
+    piles[pid] = [...pile];
+    tops[pid] = pile.length ? pile[pile.length - 1] : 0;
+    if (pile.length > maxCards) {
+      maxCards = pile.length;
+      winners = [pid];
+    } else if (pile.length === maxCards) {
+      winners.push(pid);
+    }
+  });
+
+  if (winners.length > 1) {
+    let minTop = Infinity;
+    let tieWinners = [];
+    winners.forEach(pid => {
+      if (tops[pid] < minTop) { minTop = tops[pid]; tieWinners = [pid]; }
+      else if (tops[pid] === minTop) tieWinners.push(pid);
+    });
+    winners = tieWinners;
+  }
+
+  let minTop = Infinity;
+  let lowTopPlayers = [];
+  Object.entries(tops).forEach(([pid, top]) => {
+    if (top < minTop) { minTop = top; lowTopPlayers = [pid]; }
+    else if (top === minTop) lowTopPlayers.push(pid);
+  });
+
+  const updates = {};
+  Object.keys(players).forEach(pid => {
+    const pileLen = (players[pid].pile || []).length;
+    updates[`players/${pid}/roundScores`] = [...(players[pid].roundScores || []), pileLen];
+    let coins = (players[pid].coins || 0) + 3;
+    if (lowTopPlayers.includes(pid)) coins += 1;
+    updates[`players/${pid}/coins`] = coins;
+    updates[`players/${pid}/roundState`] = defaultRoundState();
+  });
+
+  updates['gameState/roundResults'] = {
+    round: gs.round,
+    piles,
+    winners,
+    lowTopBonus: lowTopPlayers,
+  };
+
+  const totalScores = gs.totalScores || {};
+  Object.keys(players).forEach(pid => {
+    totalScores[pid] = (totalScores[pid] || 0) + (players[pid].pile || []).length;
+  });
+  updates['gameState/totalScores'] = totalScores;
+
+  await roomRef.update(updates);
+
+  if (isHost) {
+    setTimeout(async () => {
+      const currentGs = (await roomRef.child('gameState').once('value')).val();
+      if (!currentGs || currentGs.phase !== 'roundEnd') return;
+      if (currentGs.round >= currentGs.totalRounds) {
+        await roomRef.child('gameState/phase').set('ended');
+        await roomRef.child('gameState/winner').set(findGrandWinner(totalScores));
+      } else {
+        shopAdvanceTriggered = false;
+        roundEndProcessed = false;
+        await roomRef.child('gameState').update({
+          phase: 'shop',
+          shopOpen: true,
+          shopDeadline: Date.now() + SHOP_SECONDS * 1000,
+          shopReady: {},
+        });
+      }
+    }, 4000);
+  }
+}
+
+function findGrandWinner(totalScores) {
+  let max = -1;
+  let winners = [];
+  Object.entries(totalScores).forEach(([pid, score]) => {
+    if (score > max) { max = score; winners = [pid]; }
+    else if (score === max) winners.push(pid);
+  });
+  return winners[0];
+}
+
+function renderRoundOverlay() {
+  const gs = roomData.gameState;
+  const rr = gs.roundResults;
+  if (!rr) return;
+  const overlay = document.getElementById('round-overlay');
+  overlay.classList.add('visible');
+  document.getElementById('round-overlay-title').textContent = `Round ${rr.round} Complete`;
+
+  const table = document.getElementById('round-results-table');
+  table.innerHTML = '<tr><th>Player</th><th>Cards</th><th>Top</th></tr>';
+  Object.entries(rr.piles || {}).forEach(([pid, pile]) => {
+    const p = roomData.players?.[pid] || {};
+    const isWinner = rr.winners.includes(pid);
+    table.innerHTML += `<tr class="${isWinner ? 'winner-row' : ''}">
+      <td>${escapeHtml(p.name || '')}${isWinner ? ' 👑' : ''}</td>
+      <td>${pile.length}</td>
+      <td>${pile.length ? pile[pile.length-1] : 0}</td>
+    </tr>`;
+  });
+
+  document.getElementById('round-coin-msg').textContent = 'Everyone received 3 coins' +
+    (rr.lowTopBonus?.length ? ` (+1 bonus for lowest top: ${rr.lowTopBonus.map(id => roomData.players[id]?.name || id).join(', ')})` : '');
+
+  const isFinal = gs.round >= gs.totalRounds;
+  document.getElementById('round-next-msg').textContent = isFinal ? 'Calculating final scores…' : 'Shop opening…';
+
+  if (gs.phase !== 'roundEnd') overlay.classList.remove('visible');
+}
+
+function renderFinale() {
+  showScreen('game-screen');
+  const gs = roomData.gameState;
+  const overlay = document.getElementById('finale-overlay');
+  overlay.classList.add('visible');
+  document.getElementById('round-overlay').classList.remove('visible');
+
+  const table = document.getElementById('finale-table');
+  table.innerHTML = '<tr><th>Player</th><th>Total Cards</th><th>Coins Left</th></tr>';
+  const scores = gs.totalScores || {};
+  const sorted = Object.entries(scores).sort((a, b) => b[1] - a[1]);
+  sorted.forEach(([pid, score], i) => {
+    const p = roomData.players[pid] || {};
+    table.innerHTML += `<tr class="${i === 0 ? 'winner-row' : ''}">
+      <td>${escapeHtml(p.name || '')}${i === 0 ? ' 🏆' : ''}</td>
+      <td>${score}</td>
+      <td>${p.coins || 0}</td>
+    </tr>`;
+  });
+}
+
+document.getElementById('btn-back-lobby').onclick = leaveRoom;
+
+function renderShop() {
+  showScreen('shop-screen');
+  document.getElementById('round-overlay').classList.remove('visible');
+  const gs = roomData.gameState;
+  const me = roomData.players[myId];
+
+  document.getElementById('shop-coins').textContent = `🪙 ${me?.coins || 0} coins`;
+  updateShopTimerDisplay(gs.shopDeadline);
+
+  const grid = document.getElementById('upgrade-grid');
+  grid.innerHTML = '';
+  UPGRADES.forEach(up => {
+    const owned = (me?.upgrades || []).includes(up.id);
+    const canBuy = !owned && (me?.coins || 0) >= up.cost;
+    const div = document.createElement('div');
+    div.className = 'upgrade-card';
+    div.innerHTML = `
+      <div class="upgrade-info">
+        <div class="upgrade-name">${up.name}</div>
+        <div class="upgrade-desc">${up.desc}</div>
+      </div>
+      <div>
+        ${owned
+          ? '<span class="upgrade-owned">Owned</span>'
+          : `<span class="upgrade-cost">${up.cost} 🪙</span>
+             <button class="btn btn-sm btn-gold" ${canBuy ? '' : 'disabled'}>Buy</button>`}
+      </div>
+    `;
+    if (!owned) {
+      div.querySelector('button').onclick = () => buyUpgrade(up.id, up.cost);
+    }
+    grid.appendChild(div);
+  });
+
+  const ready = gs.shopReady || {};
+  const total = Object.keys(roomData.players || {}).length;
+  const readyCount = Object.values(ready).filter(Boolean).length;
+  document.getElementById('ready-status').textContent = `${readyCount}/${total} players ready`;
+  document.getElementById('btn-shop-ready').disabled = !!ready[myId];
+  document.getElementById('btn-shop-ready').textContent = ready[myId] ? 'Ready ✓' : 'Ready';
+
+  if (isHost && readyCount >= total && total > 0 && !shopAdvanceTriggered) {
+    shopAdvanceTriggered = true;
+    startNextRound();
+  }
+}
+
+document.getElementById('btn-shop-ready').onclick = async () => {
+  await roomRef.child('gameState/shopReady/' + myId).set(true);
+};
+
+async function buyUpgrade(id, cost) {
+  const me = roomData.players[myId];
+  if ((me?.upgrades || []).includes(id)) return;
+  if ((me?.coins || 0) < cost) return showToast('Not enough coins');
+
+  await roomRef.child('players/' + myId).transaction(player => {
+    if (!player) return;
+    if ((player.upgrades || []).includes(id)) return;
+    if ((player.coins || 0) < cost) return;
+    player.coins = (player.coins || 0) - cost;
+    player.upgrades = [...(player.upgrades || []), id];
+    return player;
+  });
+  showToast('Purchased ' + UPGRADES.find(u => u.id === id).name + '!');
+  await roomRef.child('gameState/shopReady/' + myId).set(true);
+}
+
+async function startNextRound() {
+  if (!isHost) return;
+  const gs = roomData.gameState;
+  if (gs.phase !== 'shop') return;
+
+  const playerIds = Object.keys(roomData.players);
+  const shuffledOrder = shuffle(playerIds);
+  const size = deckSizeForPlayers(playerIds.length);
+  let deck = buildDeck(size);
+
+  const players = { ...roomData.players };
+  for (const pid of playerIds) {
+    players[pid] = {
+      ...players[pid],
+      pile: [],
+      roundState: defaultRoundState(),
     };
-
-    const USE_FIREBASE = !firebaseConfig.apiKey.includes("PASTE_");
-    const COLORS = ["#71d4ff", "#ffcc66", "#a98bff", "#80e18d"];
-    const SPAWNS = [
-      { x: 0.08, y: 0.08 },
-      { x: 0.92, y: 0.08 },
-      { x: 0.08, y: 0.92 },
-      { x: 0.92, y: 0.92 }
-    ];
-
-    const $ = (id) => document.getElementById(id);
-    const canvas = $("game");
-    const ctx = canvas.getContext("2d");
-    const overlay = $("overlay");
-    const overlayMsg = $("overlayMsg");
-    const roomCodeEl = $("roomCode");
-    const connDot = $("connDot");
-    const connText = $("connText");
-    const roleText = $("roleText");
-    const startBtn = $("startBtn");
-    const scoresEl = $("scores");
-    const roundText = $("roundText");
-    const tags = [$("tag0"), $("tag1"), $("tag2"), $("tag3")];
-
-    let app = null;
-    let auth = null;
-    let db = null;
-    let uid = "local-" + Math.random().toString(36).slice(2, 10);
-    let roomCode = "";
-    let roomRef = null;
-    let playerRef = null;
-    let stateRef = null;
-    let hostRef = null;
-    let presenceRef = null;
-    let isHost = false;
-    let localIndex = 0;
-    let lastFrame = performance.now();
-    let lastSync = 0;
-    let lastHeartbeat = 0;
-    let lastPassAt = 0;
-    let drag = null;
-    let localPrediction = null;
-    let arenaSize = 800;
-
-    const game = emptyGame();
-    const renderState = emptyGame();
-
-    function emptyGame() {
-      return {
-        phase: "idle",
-        round: 0,
-        message: "Waiting for players",
-        countdownEnd: 0,
-        fuseEnd: 0,
-        roundResumeAt: 0,
-        winnerId: "",
-        bombCarrierId: "",
-        players: {},
-        boxes: [],
-        scores: {}
-      };
-    }
-
-    function nowMs() {
-      return Date.now();
-    }
-
-    function clamp(v, min, max) {
-      return Math.max(min, Math.min(max, v));
-    }
-
-    function hypot(x, y) {
-      return Math.hypot(x, y);
-    }
-
-    function speed(o) {
-      return hypot(o.vx || 0, o.vy || 0);
-    }
-
-    function copyInto(target, source) {
-      target.phase = source.phase || "idle";
-      target.round = source.round || 0;
-      target.message = source.message || "";
-      target.countdownEnd = source.countdownEnd || 0;
-      target.fuseEnd = source.fuseEnd || 0;
-      target.roundResumeAt = source.roundResumeAt || 0;
-      target.winnerId = source.winnerId || "";
-      target.bombCarrierId = source.bombCarrierId || "";
-      target.scores = source.scores || {};
-      target.boxes = Array.isArray(source.boxes) ? source.boxes.map(b => ({ ...b })) : [];
-      const nextPlayers = source.players || {};
-      for (const id of Object.keys(target.players)) {
-        if (!nextPlayers[id]) delete target.players[id];
-      }
-      for (const [id, p] of Object.entries(nextPlayers)) {
-        target.players[id] = { ...(target.players[id] || {}), ...p };
+    if (hasUpgrade(players[pid], 'small_start')) {
+      const lowCards = deck.filter(c => c < 40);
+      if (lowCards.length > 0) {
+        const pick = lowCards[Math.floor(Math.random() * lowCards.length)];
+        deck = deck.filter(c => c !== pick);
+        players[pid].pile = [pick];
       }
     }
+  }
 
-    function resizeCanvas() {
-      const rect = canvas.getBoundingClientRect();
-      const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
-      canvas.width = Math.max(1, Math.floor(rect.width * dpr));
-      canvas.height = Math.max(1, Math.floor(rect.height * dpr));
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      arenaSize = rect.width;
+  await roomRef.update({
+    turnOrder: shuffledOrder,
+    players,
+    gameState: {
+      ...gs,
+      phase: 'playing',
+      round: gs.round + 1,
+      turnOrder: shuffledOrder,
+      deck,
+      discards: [[], [], []],
+      currentPlayerIndex: 0,
+      turnPhase: 'action',
+      drawnCard: null,
+      turnDeadline: Date.now() + TURN_SECONDS * 1000,
+      shopOpen: false,
+      shopReady: {},
+      roundResults: {},
+      riskCards: null,
+      tempTopModifier: {},
+      pendingSteal: null,
+      pendingSabotage: null,
     }
+  });
+}
 
-    function roomPath(code) {
-      return "/rooms/" + code;
-    }
+function updateTimerDisplay(deadline) {
+  clearInterval(timerInterval);
+  const el = document.getElementById('timer');
+  function tick() {
+    if (!deadline) { el.textContent = '--'; return; }
+    const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+    el.textContent = remaining;
+    el.classList.toggle('urgent', remaining <= 5);
+  }
+  tick();
+  timerInterval = setInterval(tick, 250);
+}
 
-    async function initFirebase() {
-      if (!USE_FIREBASE) {
-        setConnection(false, "Config needed");
-        overlayMsg.textContent = "Paste your Firebase config into the HTML before using online rooms.";
-        return false;
-      }
-      app = firebase.initializeApp(firebaseConfig);
-      auth = firebase.auth();
-      db = firebase.database();
-      await auth.signInAnonymously();
-      uid = auth.currentUser.uid;
-      firebase.database().ref(".info/connected").on("value", (snap) => {
-        setConnection(!!snap.val(), snap.val() ? "Connected" : "Reconnecting");
-      });
-      return true;
-    }
+function updateShopTimerDisplay(deadline) {
+  clearInterval(shopTimerInterval);
+  const el = document.getElementById('shop-timer');
+  function tick() {
+    if (!deadline) { el.textContent = '--'; return; }
+    const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+    el.textContent = remaining;
+  }
+  tick();
+  shopTimerInterval = setInterval(tick, 250);
+}
 
-    function setConnection(ok, text) {
-      connDot.classList.toggle("ok", ok);
-      connText.textContent = text;
-    }
+async function checkTurnTimeout(gs) {
+  if (gs.phase !== 'playing' || !gs.turnDeadline) return;
+  if (Date.now() < gs.turnDeadline) return;
+  if (getCurrentPlayerId(gs) !== myId) return;
 
-    function getPlayerName() {
-      return ($("nameInput").value || "Player").trim().slice(0, 14) || "Player";
-    }
+  if (gs.turnPhase === 'deciding' && gs.drawnCard !== null) {
+    const discards = normalizeDiscards(gs.discards);
+    const emptyIdx = discards.findIndex(p => p.length === 0);
+    const idx = emptyIdx !== -1 ? emptyIdx : 0;
+    await discardCard(idx);
+  } else if (gs.turnPhase === 'risking') {
+    const cards = gs.riskCards || [0, 0];
+    await pickRiskCard(cards[0] >= cards[1] ? 0 : 1);
+  } else if (gs.turnPhase === 'action') {
+    await endTurn(myId);
+  }
+}
 
-    function makeCode() {
-      return String(Math.floor(1000 + Math.random() * 9000));
-    }
+async function checkShopTimeout(gs) {
+  if (gs.phase !== 'shop' || !gs.shopDeadline) return;
+  if (Date.now() < gs.shopDeadline) return;
 
-    async function createRoom() {
-      if (!await initFirebase()) return;
-      roomCode = makeCode();
-      roomRef = db.ref(roomPath(roomCode));
-      const initial = emptyGame();
-      initial.createdAt = firebase.database.ServerValue.TIMESTAMP;
-      initial.hostId = uid;
-      initial.players = {};
-      await roomRef.set(initial);
-      await joinExistingRoom(roomCode, true);
-    }
+  const updates = {};
+  Object.keys(roomData.players || {}).forEach(pid => {
+    updates[`gameState/shopReady/${pid}`] = true;
+  });
+  await roomRef.update(updates);
 
-    async function joinExistingRoom(code, host) {
-      if (!db && !await initFirebase()) return;
-      roomCode = String(code).replace(/\D/g, "").slice(0, 4);
-      if (roomCode.length !== 4) {
-        overlayMsg.textContent = "Enter a 4-digit room code.";
-        return;
-      }
-      roomRef = db.ref(roomPath(roomCode));
-      stateRef = roomRef;
-      hostRef = roomRef.child("hostId");
-      playerRef = roomRef.child("players").child(uid);
-      presenceRef = playerRef.child("connected");
-      const snap = await roomRef.get();
-      if (!snap.exists() && !host) {
-        overlayMsg.textContent = "Room not found.";
-        return;
-      }
-      const players = snap.child("players").val() || {};
-      const used = Object.values(players).map(p => p.index);
-      const index = [0, 1, 2, 3].find(i => !used.includes(i));
-      if (index === undefined) {
-        overlayMsg.textContent = "Room is full.";
-        return;
-      }
-      localIndex = index;
-      await playerRef.set({
-        name: getPlayerName(),
-        index,
-        color: COLORS[index],
-        connected: true,
-        ready: true,
-        joinedAt: firebase.database.ServerValue.TIMESTAMP,
-        active: true,
-        ghost: false,
-        x: SPAWNS[index].x,
-        y: SPAWNS[index].y,
-        vx: 0,
-        vy: 0,
-        lastDashAt: 0
-      });
-      playerRef.onDisconnect().remove();
-      roomRef.on("value", handleRoomUpdate);
-      overlay.style.display = "none";
-      roomCodeEl.textContent = roomCode;
-      setConnection(true, "Connected");
-    }
-
-    function handleRoomUpdate(snap) {
-      const data = snap.val();
-      if (!data) return;
-      copyInto(game, data);
-      const players = game.players || {};
-      const hostId = data.hostId || pickHostId(players);
-      isHost = hostId === uid;
-      if (!data.hostId && hostId && db) hostRef.set(hostId);
-      const hostPlayer = players[hostId];
-      if (!isHost && (!hostPlayer || !hostPlayer.connected || nowMs() - (data.hostHeartbeat || 0) > CONFIG.HOST_STALE_MS)) {
-        const nextHost = pickHostId(players);
-        if (nextHost === uid) hostRef.set(uid);
-      }
-      roleText.textContent = isHost ? "Host" : "Client";
-      startBtn.disabled = !isHost || activeConnectedPlayers().length < 2 || game.phase === "countdown" || game.phase === "playing";
-      updateHud();
-    }
-
-    function pickHostId(players) {
-      return Object.entries(players || {})
-        .filter(([, p]) => p.connected)
-        .sort((a, b) => (a[1].joinedAt || 0) - (b[1].joinedAt || 0))[0]?.[0] || "";
-    }
-
-    function activeConnectedPlayers() {
-      return Object.entries(game.players || {}).filter(([, p]) => p.connected);
-    }
-
-    function startMatchOrRound() {
-      if (!isHost) return;
-      const currentScores = game.scores || {};
-      startRound(game.round + 1, currentScores);
-    }
-
-    function startRound(round, scores) {
-      const ids = activeConnectedPlayers().slice(0, 4).map(([id]) => id);
-      if (ids.length < 2) return;
-      const players = {};
-      ids.forEach((id, i) => {
-        const base = game.players[id] || {};
-        players[id] = {
-          ...base,
-          index: base.index ?? i,
-          color: base.color || COLORS[i],
-          active: true,
-          ghost: false,
-          x: SPAWNS[i].x,
-          y: SPAWNS[i].y,
-          vx: 0,
-          vy: 0,
-          lastDashAt: 0
-        };
-      });
-      const bombCarrierId = ids[Math.floor(Math.random() * ids.length)];
-      const next = {
-        phase: "countdown",
-        message: "Get ready",
-        round,
-        countdownEnd: nowMs() + CONFIG.COUNTDOWN_SECONDS * 1000,
-        fuseEnd: 0,
-        roundResumeAt: 0,
-        winnerId: "",
-        bombCarrierId,
-        players,
-        boxes: createBoxes(),
-        scores,
-        hostId: uid,
-        hostHeartbeat: nowMs()
-      };
-      roomRef.update(next);
-    }
-
-    function createBoxes() {
-      const s = CONFIG.BOX_SIZE_RATIO;
-      const gap = s * 1.16;
-      const inset = CONFIG.BOX_CLUSTER_INSET_RATIO;
-      const far = 1 - inset - s;
-      const nearL = inset + gap;
-      const farL = far - gap;
-      const points = [
-        [inset, inset], [nearL, inset], [inset, nearL],
-        [far, inset], [farL, inset], [far, nearL],
-        [inset, far], [nearL, far], [inset, farL],
-        [far, far], [farL, far], [far, farL]
-      ];
-      return points.map(([x, y], i) => ({ id: i, x, y, vx: 0, vy: 0, angle: 0, av: 0 }));
-    }
-
-    function hostStep(dt) {
-      if (!isHost) return;
-      const t = nowMs();
-      if (t - lastHeartbeat > CONFIG.HOST_HEARTBEAT_MS) {
-        lastHeartbeat = t;
-        roomRef.update({ hostHeartbeat: t, hostId: uid });
-      }
-
-      if (game.phase === "countdown" && t >= game.countdownEnd) {
-        game.phase = "playing";
-        game.fuseEnd = t + CONFIG.FUSE_DURATION * 1000;
-        game.message = "Run";
-      }
-
-      if (game.phase === "playing") {
-        simulate(dt);
-        if (t >= game.fuseEnd) explodeCarrier();
-        const alive = Object.entries(game.players).filter(([, p]) => p.active && !p.ghost);
-        if (alive.length <= 1) {
-          const winnerId = alive[0]?.[0] || "";
-          game.phase = "roundEnd";
-          game.winnerId = winnerId;
-          game.roundResumeAt = t + CONFIG.ROUND_END_DELAY * 1000;
-          game.message = winnerId ? ((game.players[winnerId]?.name || "Player") + " wins the round") : "No winner";
-          if (winnerId) game.scores[winnerId] = (game.scores[winnerId] || 0) + 1;
-        }
-      }
-
-      if (game.phase === "roundEnd" && t >= game.roundResumeAt) {
-        const matchWinner = Object.entries(game.scores || {}).find(([, score]) => score >= CONFIG.ROUNDS_TO_WIN)?.[0];
-        if (matchWinner) {
-          game.phase = "matchEnd";
-          game.winnerId = matchWinner;
-          game.message = (game.players[matchWinner]?.name || "Player") + " wins the match";
-        } else {
-          startRound(game.round + 1, game.scores || {});
-          return;
-        }
-      }
-
-      if (t - lastSync >= 1000 / CONFIG.SYNC_RATE) {
-        lastSync = t;
-        syncHostState();
-      }
-    }
-
-    function simulate(dt) {
-      const fastest = Math.max(
-        ...Object.values(game.players || {}).map(p => speed(p)),
-        ...(game.boxes || []).map(b => speed(b)),
-        0
-      );
-      const maxStepDistance = Math.max(CONFIG.PLAYER_RADIUS_RATIO * 0.55, 0.006);
-      const dynamicSteps = Math.ceil((fastest * dt) / maxStepDistance);
-      const steps = clamp(dynamicSteps, 1, CONFIG.PHYSICS_SUBSTEPS);
-      const stepDt = dt / steps;
-      for (let i = 0; i < steps; i++) simulateStep(stepDt);
-    }
-
-    function simulateStep(dt) {
-      const players = Object.entries(game.players);
-      const boxes = game.boxes || [];
-      const pr = CONFIG.PLAYER_RADIUS_RATIO;
-      const bs = CONFIG.BOX_SIZE_RATIO;
-
-      for (const [, p] of players) {
-        if (!p.active || p.ghost) continue;
-        p.x += (p.vx || 0) * dt;
-        p.y += (p.vy || 0) * dt;
-        p.vx = (p.vx || 0) * Math.pow(CONFIG.PLAYER_FRICTION, dt * 60);
-        p.vy = (p.vy || 0) * Math.pow(CONFIG.PLAYER_FRICTION, dt * 60);
-        limitVelocity(p, CONFIG.MAX_PLAYER_SPEED_RATIO_PER_SECOND);
-        bounceCircleWalls(p, pr);
-      }
-
-      for (const b of boxes) {
-        b.x += (b.vx || 0) * dt;
-        b.y += (b.vy || 0) * dt;
-        b.angle = (b.angle || 0) + (b.av || 0) * dt;
-        b.vx = (b.vx || 0) * Math.pow(CONFIG.BOX_FRICTION, dt * 60);
-        b.vy = (b.vy || 0) * Math.pow(CONFIG.BOX_FRICTION, dt * 60);
-        b.av = (b.av || 0) * Math.pow(CONFIG.BOX_ANGULAR_FRICTION, dt * 60);
-        limitVelocity(b, CONFIG.MAX_BOX_SPEED_RATIO_PER_SECOND);
-        b.av = clamp(b.av || 0, -CONFIG.MAX_BOX_ANGULAR_SPEED, CONFIG.MAX_BOX_ANGULAR_SPEED);
-        bounceBoxWalls(b, bs);
-      }
-
-      for (let pass = 0; pass < CONFIG.COLLISION_PASSES; pass++) {
-        for (const [, p] of players) {
-          if (!p.active || p.ghost) continue;
-          for (const b of boxes) collideCircleBox(p, b, pr, bs);
-        }
-
-        for (let i = 0; i < boxes.length; i++) {
-          for (let j = i + 1; j < boxes.length; j++) collideBoxes(boxes[i], boxes[j], bs);
-        }
-
-        for (let i = 0; i < players.length; i++) {
-          const [idA, a] = players[i];
-          if (!a.active || a.ghost) continue;
-          for (let j = i + 1; j < players.length; j++) {
-            const [idB, b] = players[j];
-            if (!b.active || b.ghost) continue;
-            collidePlayers(idA, a, idB, b, pr);
-          }
-        }
-      }
-    }
-
-    function limitVelocity(o, max) {
-      const s = speed(o);
-      if (s <= max || s <= 0.0001) return;
-      const scale = max / s;
-      o.vx = (o.vx || 0) * scale;
-      o.vy = (o.vy || 0) * scale;
-    }
-
-    function bounceCircleWalls(p, r) {
-      if (p.x < r) { p.x = r; p.vx = Math.abs(p.vx || 0) * CONFIG.PLAYER_RESTITUTION; }
-      if (p.x > 1 - r) { p.x = 1 - r; p.vx = -Math.abs(p.vx || 0) * CONFIG.PLAYER_RESTITUTION; }
-      if (p.y < r) { p.y = r; p.vy = Math.abs(p.vy || 0) * CONFIG.PLAYER_RESTITUTION; }
-      if (p.y > 1 - r) { p.y = 1 - r; p.vy = -Math.abs(p.vy || 0) * CONFIG.PLAYER_RESTITUTION; }
-    }
-
-    function bounceBoxWalls(b, s) {
-      if (b.x < 0) { b.x = 0; b.vx = Math.abs(b.vx || 0) * CONFIG.BOX_RESTITUTION; }
-      if (b.x > 1 - s) { b.x = 1 - s; b.vx = -Math.abs(b.vx || 0) * CONFIG.BOX_RESTITUTION; }
-      if (b.y < 0) { b.y = 0; b.vy = Math.abs(b.vy || 0) * CONFIG.BOX_RESTITUTION; }
-      if (b.y > 1 - s) { b.y = 1 - s; b.vy = -Math.abs(b.vy || 0) * CONFIG.BOX_RESTITUTION; }
-    }
-
-    function collideCircleBox(p, b, r, s) {
-      const cx = clamp(p.x, b.x, b.x + s);
-      const cy = clamp(p.y, b.y, b.y + s);
-      let dx = p.x - cx;
-      let dy = p.y - cy;
-      let d = hypot(dx, dy);
-      if (d >= r) return;
-      if (d < 0.0001) {
-        const pvx = p.vx || 0;
-        const pvy = p.vy || 0;
-        const ps = hypot(pvx, pvy);
-        if (ps > 0.0001) {
-          dx = -pvx / ps;
-          dy = -pvy / ps;
-        } else {
-          dx = p.x < b.x + s / 2 ? -1 : 1;
-          dy = 0;
-        }
-        d = 1;
-      }
-      const nx = dx / d;
-      const ny = dy / d;
-      const overlap = r - d;
-      const boxShare = CONFIG.BOX_PLAYER_SEPARATION_SHARE;
-      p.x += nx * overlap * (1 - boxShare);
-      p.y += ny * overlap * (1 - boxShare);
-      b.x -= nx * overlap * boxShare;
-      b.y -= ny * overlap * boxShare;
-      const incoming = Math.max(0, -((p.vx || 0) * nx + (p.vy || 0) * ny));
-      b.vx = (b.vx || 0) - nx * incoming * CONFIG.BOX_PUSH_MULTIPLIER;
-      b.vy = (b.vy || 0) - ny * incoming * CONFIG.BOX_PUSH_MULTIPLIER;
-      const contactX = cx - (b.x + s / 2);
-      const contactY = cy - (b.y + s / 2);
-      const impulseX = -nx * incoming;
-      const impulseY = -ny * incoming;
-      const torque = contactX * impulseY - contactY * impulseX;
-      b.av = clamp((b.av || 0) + torque * CONFIG.BOX_TORQUE_MULTIPLIER, -CONFIG.MAX_BOX_ANGULAR_SPEED, CONFIG.MAX_BOX_ANGULAR_SPEED);
-      p.vx = (p.vx || 0) * CONFIG.PLAYER_BOX_BRAKE;
-      p.vy = (p.vy || 0) * CONFIG.PLAYER_BOX_BRAKE;
-      bounceBoxWalls(b, s);
-    }
-
-    function collideBoxes(a, b, s) {
-      if (a.x + s <= b.x || b.x + s <= a.x || a.y + s <= b.y || b.y + s <= a.y) return;
-      const ax = a.x + s / 2;
-      const ay = a.y + s / 2;
-      const bx = b.x + s / 2;
-      const by = b.y + s / 2;
-      const ox = s - Math.abs(ax - bx);
-      const oy = s - Math.abs(ay - by);
-      if (ox < oy) {
-        const dir = ax < bx ? -1 : 1;
-        a.x += dir * ox / 2;
-        b.x -= dir * ox / 2;
-        const av = a.vx || 0;
-        a.vx = (b.vx || 0) * CONFIG.BOX_RESTITUTION;
-        b.vx = av * CONFIG.BOX_RESTITUTION;
-        a.av = (a.av || 0) + dir * Math.abs(b.vy || 0) * 0.25;
-        b.av = (b.av || 0) + dir * Math.abs(a.vy || 0) * 0.25;
-      } else {
-        const dir = ay < by ? -1 : 1;
-        a.y += dir * oy / 2;
-        b.y -= dir * oy / 2;
-        const av = a.vy || 0;
-        a.vy = (b.vy || 0) * CONFIG.BOX_RESTITUTION;
-        b.vy = av * CONFIG.BOX_RESTITUTION;
-        a.av = (a.av || 0) - dir * Math.abs(b.vx || 0) * 0.25;
-        b.av = (b.av || 0) - dir * Math.abs(a.vx || 0) * 0.25;
-      }
-      a.av = clamp(a.av || 0, -CONFIG.MAX_BOX_ANGULAR_SPEED, CONFIG.MAX_BOX_ANGULAR_SPEED);
-      b.av = clamp(b.av || 0, -CONFIG.MAX_BOX_ANGULAR_SPEED, CONFIG.MAX_BOX_ANGULAR_SPEED);
-      bounceBoxWalls(a, s);
-      bounceBoxWalls(b, s);
-    }
-
-    function collidePlayers(idA, a, idB, b, r) {
-      let dx = b.x - a.x;
-      let dy = b.y - a.y;
-      let d = hypot(dx, dy);
-      if (d >= r * 2) return;
-      if (d < 0.0001) {
-        dx = 1; dy = 0; d = 1;
-      }
-      const nx = dx / d;
-      const ny = dy / d;
-      const overlap = r * 2 - d;
-      a.x -= nx * overlap / 2;
-      a.y -= ny * overlap / 2;
-      b.x += nx * overlap / 2;
-      b.y += ny * overlap / 2;
-      const avn = (a.vx || 0) * nx + (a.vy || 0) * ny;
-      const bvn = (b.vx || 0) * nx + (b.vy || 0) * ny;
-      const impulse = (avn - bvn) * CONFIG.PLAYER_RESTITUTION;
-      a.vx = (a.vx || 0) - impulse * nx;
-      a.vy = (a.vy || 0) - impulse * ny;
-      b.vx = (b.vx || 0) + impulse * nx;
-      b.vy = (b.vy || 0) + impulse * ny;
-      if (game.phase === "playing" && nowMs() - lastPassAt > CONFIG.PASS_GRACE_SECONDS * 1000) {
-        if (game.bombCarrierId === idA) { game.bombCarrierId = idB; lastPassAt = nowMs(); }
-        else if (game.bombCarrierId === idB) { game.bombCarrierId = idA; lastPassAt = nowMs(); }
-      }
-    }
-
-    function explodeCarrier() {
-      const id = game.bombCarrierId;
-      if (game.players[id]) {
-        game.players[id].active = false;
-        game.players[id].ghost = true;
-        game.players[id].vx = 0;
-        game.players[id].vy = 0;
-      }
-      const alive = Object.entries(game.players).filter(([, p]) => p.active && !p.ghost);
-      game.bombCarrierId = alive[Math.floor(Math.random() * alive.length)]?.[0] || "";
-      game.fuseEnd = nowMs() + CONFIG.FUSE_DURATION * 1000;
-      lastPassAt = nowMs();
-    }
-
-    function syncHostState() {
-      if (!roomRef) return;
-      const slimPlayers = {};
-      for (const [id, p] of Object.entries(game.players || {})) {
-        slimPlayers[id] = {
-          name: p.name,
-          index: p.index,
-          color: p.color,
-          connected: p.connected !== false,
-          joinedAt: p.joinedAt || 0,
-          ready: p.ready !== false,
-          active: p.active !== false,
-          ghost: !!p.ghost,
-          x: +p.x.toFixed(5),
-          y: +p.y.toFixed(5),
-          vx: +(p.vx || 0).toFixed(5),
-          vy: +(p.vy || 0).toFixed(5),
-          lastDashAt: p.lastDashAt || 0
-        };
-      }
-      roomRef.update({
-        phase: game.phase,
-        round: game.round,
-        message: game.message,
-        countdownEnd: game.countdownEnd,
-        fuseEnd: game.fuseEnd,
-        roundResumeAt: game.roundResumeAt,
-        winnerId: game.winnerId,
-        bombCarrierId: game.bombCarrierId,
-        scores: game.scores || {},
-        boxes: (game.boxes || []).map(b => ({
-          id: b.id,
-          x: +b.x.toFixed(5),
-          y: +b.y.toFixed(5),
-          vx: +(b.vx || 0).toFixed(5),
-          vy: +(b.vy || 0).toFixed(5),
-          angle: +(b.angle || 0).toFixed(5),
-          av: +(b.av || 0).toFixed(5)
-        })),
-        players: slimPlayers
-      });
-    }
-
-    function tryDash() {
-      if (!drag || !roomCode) return;
-      const p = game.players[uid];
-      if (!p || !p.active || p.ghost || game.phase !== "playing") return;
-      const minLockout = game.bombCarrierId === uid ? CONFIG.CARRIER_LOCKOUT_BONUS : CONFIG.MIN_LOCKOUT;
-      const elapsed = (nowMs() - (p.lastDashAt || 0)) / 1000;
-      if (elapsed < minLockout || speed(p) * arenaSize > CONFIG.NEAR_ZERO_VELOCITY_THRESHOLD) return;
-
-      const maxDrag = arenaSize * CONFIG.MAX_DRAG_RADIUS_RATIO;
-      const dx = clamp(drag.currentX - drag.startX, -maxDrag, maxDrag);
-      const dy = clamp(drag.currentY - drag.startY, -maxDrag, maxDrag);
-      const dist = Math.min(maxDrag, hypot(dx, dy));
-      if (dist < 4) return;
-      const power = dist / maxDrag;
-      const maxSpeed = CONFIG.MAX_DASH_SPEED_MULTIPLIER * (1 - CONFIG.PLAYER_FRICTION) * 60;
-      p.vx = (-dx / Math.max(dist, 1)) * maxSpeed * power;
-      p.vy = (-dy / Math.max(dist, 1)) * maxSpeed * power;
-      p.lastDashAt = nowMs();
-      if (isHost) {
-        syncHostState();
-      } else {
-        localPrediction = {
-          x: p.x,
-          y: p.y,
-          vx: p.vx,
-          vy: p.vy,
-          lastDashAt: p.lastDashAt,
-          until: nowMs() + CONFIG.CLIENT_PREDICTION_MS
-        };
-        renderState.players[uid] = { ...(renderState.players[uid] || p), ...p };
-        playerRef.update({ vx: p.vx, vy: p.vy, lastDashAt: p.lastDashAt });
-      }
-    }
-
-    function canvasPoint(evt) {
-      const rect = canvas.getBoundingClientRect();
-      const source = evt.touches?.[0] || evt.changedTouches?.[0] || evt;
-      return {
-        x: source.clientX - rect.left,
-        y: source.clientY - rect.top
-      };
-    }
-
-    function onPointerStart(evt) {
-      evt.preventDefault();
-      const pt = canvasPoint(evt);
-      drag = { startX: pt.x, startY: pt.y, currentX: pt.x, currentY: pt.y };
-    }
-
-    function onPointerMove(evt) {
-      if (!drag) return;
-      evt.preventDefault();
-      const pt = canvasPoint(evt);
-      drag.currentX = pt.x;
-      drag.currentY = pt.y;
-    }
-
-    function onPointerEnd(evt) {
-      if (!drag) return;
-      evt.preventDefault();
-      if (evt.changedTouches?.[0]) {
-        const pt = canvasPoint(evt);
-        drag.currentX = pt.x;
-        drag.currentY = pt.y;
-      }
-      tryDash();
-      drag = null;
-    }
-
-    function render(dt) {
-      const source = game;
-      if (isHost) copyInto(renderState, source);
-      else {
-        interpolateState(renderState, source);
-        applyClientPrediction(dt);
-      }
-      draw();
-      updateRoundText();
-      updateCornerTags();
-    }
-
-    function applyClientPrediction(dt) {
-      if (!localPrediction || !renderState.players[uid] || game.phase !== "playing") return;
-      const authoritative = game.players[uid];
-      const predicted = renderState.players[uid];
-      const t = nowMs();
-      localPrediction.x += (localPrediction.vx || 0) * dt;
-      localPrediction.y += (localPrediction.vy || 0) * dt;
-      localPrediction.vx = (localPrediction.vx || 0) * Math.pow(CONFIG.PLAYER_FRICTION, dt * 60);
-      localPrediction.vy = (localPrediction.vy || 0) * Math.pow(CONFIG.PLAYER_FRICTION, dt * 60);
-      limitVelocity(localPrediction, CONFIG.MAX_PLAYER_SPEED_RATIO_PER_SECOND);
-      bounceCircleWalls(localPrediction, CONFIG.PLAYER_RADIUS_RATIO);
-
-      predicted.x = localPrediction.x;
-      predicted.y = localPrediction.y;
-      predicted.vx = localPrediction.vx;
-      predicted.vy = localPrediction.vy;
-      predicted.lastDashAt = localPrediction.lastDashAt;
-
-      const serverCaughtUp = authoritative &&
-        authoritative.lastDashAt === localPrediction.lastDashAt &&
-        hypot((authoritative.x || 0) - localPrediction.x, (authoritative.y || 0) - localPrediction.y) < CONFIG.CLIENT_PREDICTION_RECONCILE_DISTANCE;
-      const predictionExpired = t > localPrediction.until || speed(localPrediction) * arenaSize < CONFIG.NEAR_ZERO_VELOCITY_THRESHOLD;
-      if (serverCaughtUp || predictionExpired) localPrediction = null;
-    }
-
-    function interpolateState(target, source) {
-      target.phase = source.phase;
-      target.round = source.round;
-      target.message = source.message;
-      target.countdownEnd = source.countdownEnd;
-      target.fuseEnd = source.fuseEnd;
-      target.roundResumeAt = source.roundResumeAt;
-      target.winnerId = source.winnerId;
-      target.bombCarrierId = source.bombCarrierId;
-      target.scores = source.scores || {};
-      for (const [id, p] of Object.entries(source.players || {})) {
-        if (!target.players[id]) target.players[id] = { ...p };
-        const rp = target.players[id];
-        rp.x = rp.x + ((p.x || 0) - (rp.x || 0)) * CONFIG.INTERPOLATION;
-        rp.y = rp.y + ((p.y || 0) - (rp.y || 0)) * CONFIG.INTERPOLATION;
-        Object.assign(rp, { ...p, x: rp.x, y: rp.y });
-      }
-      for (const id of Object.keys(target.players)) if (!source.players?.[id]) delete target.players[id];
-      target.boxes = (source.boxes || []).map((b, i) => {
-        const prev = target.boxes[i] || b;
-        return {
-          ...b,
-          x: prev.x + (b.x - prev.x) * CONFIG.INTERPOLATION,
-          y: prev.y + (b.y - prev.y) * CONFIG.INTERPOLATION,
-          angle: (prev.angle || 0) + ((b.angle || 0) - (prev.angle || 0)) * CONFIG.INTERPOLATION
-        };
-      });
-    }
-
-    function draw() {
-      const w = arenaSize;
-      ctx.clearRect(0, 0, w, w);
-      drawFloor(w);
-      const bs = CONFIG.BOX_SIZE_RATIO * w;
-      const pr = CONFIG.PLAYER_RADIUS_RATIO * w;
-
-      for (const b of renderState.boxes || []) {
-        const x = b.x * w;
-        const y = b.y * w;
-        ctx.fillStyle = "#6d7380";
-        ctx.strokeStyle = "#171b22";
-        ctx.lineWidth = Math.max(2, w * 0.004);
-        ctx.save();
-        ctx.translate(x + bs / 2, y + bs / 2);
-        ctx.rotate(b.angle || 0);
-        ctx.fillRect(-bs / 2, -bs / 2, bs, bs);
-        ctx.strokeRect(-bs / 2, -bs / 2, bs, bs);
-        ctx.beginPath();
-        ctx.moveTo(-bs / 2, 0);
-        ctx.lineTo(bs / 2, 0);
-        ctx.moveTo(0, -bs / 2);
-        ctx.lineTo(0, bs / 2);
-        ctx.globalAlpha = 0.35;
-        ctx.strokeStyle = "#f4f7fb";
-        ctx.lineWidth = Math.max(1, w * 0.002);
-        ctx.stroke();
-        ctx.globalAlpha = 1;
-        ctx.restore();
-      }
-
-      for (const [id, p] of Object.entries(renderState.players || {})) {
-        const x = p.x * w;
-        const y = p.y * w;
-        ctx.globalAlpha = p.ghost ? 0.32 : 1;
-        ctx.beginPath();
-        ctx.arc(x, y, pr, 0, Math.PI * 2);
-        ctx.fillStyle = p.color || "#ffffff";
-        ctx.fill();
-        ctx.lineWidth = Math.max(2, w * 0.004);
-        ctx.strokeStyle = id === uid ? "#ffffff" : "#111318";
-        ctx.stroke();
-        if (renderState.bombCarrierId === id && !p.ghost) {
-          ctx.beginPath();
-          ctx.arc(x, y, pr * 1.55, 0, Math.PI * 2);
-          ctx.strokeStyle = "#ff6377";
-          ctx.lineWidth = Math.max(3, w * 0.006);
-          ctx.stroke();
-        }
-        ctx.globalAlpha = 1;
-      }
-
-      drawCenterTimer(w);
-      drawDrag(w);
-    }
-
-    function drawFloor(w) {
-      const cells = 16;
-      const s = w / cells;
-      for (let y = 0; y < cells; y++) {
-        for (let x = 0; x < cells; x++) {
-          ctx.fillStyle = (x + y) % 2 ? "#1a2029" : "#202734";
-          ctx.fillRect(x * s, y * s, s, s);
-        }
-      }
-      ctx.strokeStyle = "rgba(255,255,255,0.12)";
-      ctx.lineWidth = 1;
-      for (let i = 0; i <= cells; i++) {
-        ctx.beginPath();
-        ctx.moveTo(i * s, 0);
-        ctx.lineTo(i * s, w);
-        ctx.moveTo(0, i * s);
-        ctx.lineTo(w, i * s);
-        ctx.stroke();
-      }
-    }
-
-    function drawCenterTimer(w) {
-      let text = "";
-      if (renderState.phase === "countdown") text = String(Math.max(0, Math.ceil((renderState.countdownEnd - nowMs()) / 1000)));
-      if (renderState.phase === "playing") text = String(Math.max(0, Math.ceil((renderState.fuseEnd - nowMs()) / 1000)));
-      if (!text) return;
-      ctx.save();
-      ctx.globalAlpha = 0.5;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.font = "800 " + Math.floor(w * 0.22) + "px system-ui, sans-serif";
-      ctx.fillStyle = renderState.phase === "playing" ? "#ff6377" : "#f4f7fb";
-      ctx.fillText(text, w / 2, w / 2);
-      ctx.restore();
-    }
-
-    function drawDrag(w) {
-      if (!drag) return;
-      const maxDrag = w * CONFIG.MAX_DRAG_RADIUS_RATIO;
-      const dx = drag.currentX - drag.startX;
-      const dy = drag.currentY - drag.startY;
-      const d = Math.min(maxDrag, hypot(dx, dy));
-      if (d <= 1) return;
-      const nx = dx / hypot(dx, dy);
-      const ny = dy / hypot(dx, dy);
-      const cx = drag.startX + nx * d;
-      const cy = drag.startY + ny * d;
-      ctx.save();
-      ctx.strokeStyle = "#71d4ff";
-      ctx.fillStyle = "#71d4ff";
-      ctx.lineWidth = Math.max(2, w * 0.005);
-      ctx.globalAlpha = 0.9;
-      ctx.beginPath();
-      ctx.arc(drag.startX, drag.startY, maxDrag, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(drag.startX, drag.startY);
-      ctx.lineTo(cx, cy);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(drag.startX, drag.startY);
-      ctx.lineTo(drag.startX - nx * d, drag.startY - ny * d);
-      ctx.strokeStyle = "#80e18d";
-      ctx.stroke();
-      ctx.restore();
-    }
-
-    function updateHud() {
-      const entries = Object.entries(game.players || {}).sort((a, b) => (a[1].index || 0) - (b[1].index || 0));
-      scoresEl.innerHTML = "";
-      for (let i = 0; i < 4; i++) {
-        const entry = entries[i];
-        const div = document.createElement("div");
-        div.className = "score" + (entry?.[0] === uid ? " me" : "");
-        if (entry) {
-          const [id, p] = entry;
-          div.innerHTML = "<div class='name'></div><div class='points'></div>";
-          div.querySelector(".name").textContent = (p.name || "Player") + (id === game.bombCarrierId ? " - bomb" : "");
-          div.querySelector(".points").textContent = game.scores?.[id] || 0;
-        } else {
-          div.innerHTML = "<div class='name'>Open slot</div><div class='points'>-</div>";
-        }
-        scoresEl.appendChild(div);
-      }
-    }
-
-    function updateRoundText() {
-      if (!roomCode) {
-        roundText.textContent = "Waiting for room";
-        return;
-      }
-      const msg = renderState.message || renderState.phase || "Lobby";
-      roundText.textContent = "Round " + (renderState.round || 0) + " - " + msg;
-      if (renderState.phase === "matchEnd") showWinner();
-    }
-
-    function updateCornerTags() {
-      const entries = Object.entries(renderState.players || {}).sort((a, b) => (a[1].index || 0) - (b[1].index || 0));
-      tags.forEach((tag, i) => {
-        const p = entries[i]?.[1];
-        tag.textContent = p ? (p.name || "Player") : "";
-      });
-    }
-
-    function showWinner() {
-      const winner = renderState.players[renderState.winnerId]?.name || "Player";
-      overlay.style.display = "grid";
-      overlay.querySelector("h1").textContent = winner + " wins";
-      overlay.querySelector("p").textContent = "Match complete.";
-      $("createBtn").textContent = "New room";
-      overlayMsg.textContent = "Create or join another room to play again.";
-    }
-
-    function loop(ts) {
-      const dt = Math.min(0.033, (ts - lastFrame) / 1000 || 0);
-      lastFrame = ts;
-      hostStep(dt);
-      render(dt);
-      requestAnimationFrame(loop);
-    }
-
-    window.addEventListener("resize", resizeCanvas);
-    canvas.addEventListener("mousedown", onPointerStart);
-    window.addEventListener("mousemove", onPointerMove, { passive: false });
-    window.addEventListener("mouseup", onPointerEnd, { passive: false });
-    canvas.addEventListener("touchstart", onPointerStart, { passive: false });
-    canvas.addEventListener("touchmove", onPointerMove, { passive: false });
-    canvas.addEventListener("touchend", onPointerEnd, { passive: false });
-    canvas.addEventListener("touchcancel", onPointerEnd, { passive: false });
-    $("createBtn").addEventListener("click", createRoom);
-    $("joinBtn").addEventListener("click", () => joinExistingRoom($("joinInput").value, false));
-    startBtn.addEventListener("click", startMatchOrRound);
-
-    resizeCanvas();
-    updateHud();
-    requestAnimationFrame(loop);
-  </script>
+  if (isHost) {
+    setTimeout(() => startNextRound(), 500);
+  }
+}
+</script>
 </body>
 </html>
