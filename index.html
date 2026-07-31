@@ -172,10 +172,12 @@
       font-size: clamp(0.65rem, 1.1vmin, 0.85rem);
     }
 
-    /* Drawn card zone (beside current player) */
+    /* Drawn card zone (pinned to right side) */
     #drawn-zone {
-      position: absolute; z-index: 50;
-      display: none; flex-direction: column; align-items: center; gap: .5rem;
+      position: absolute; top: 50%; right: 5vw;
+      transform: translateY(-50%);
+      z-index: 50; display: none; flex-direction: column;
+      align-items: center; gap: 0.5rem;
     }
     #drawn-zone.visible { display: flex; }
     .action-buttons { display: flex; flex-wrap: wrap; gap: .4rem; justify-content: center; max-width: clamp(200px, 30vw, 320px); }
@@ -833,7 +835,7 @@ function renderGame() {
 
   document.getElementById('btn-draw').onclick = () => drawCard();
 
-  renderDrawnZone(gs, turnOrder, n, radius, rotDeg);
+  renderDrawnZone(gs);
   renderAbilityBar(gs);
   renderRiskZone(gs);
 
@@ -861,7 +863,7 @@ function canTakeFromDiscard(playerId, card, gs) {
   return card > getEffectiveTop(playerId, gs);
 }
 
-function renderDrawnZone(gs, turnOrder, n, radius, rotDeg) {
+function renderDrawnZone(gs) {
   const zone = document.getElementById('drawn-zone');
   const btns = document.getElementById('action-buttons');
   btns.innerHTML = '';
@@ -873,15 +875,6 @@ function renderDrawnZone(gs, turnOrder, n, radius, rotDeg) {
 
   zone.classList.add('visible');
   document.getElementById('drawn-card-el').textContent = gs.drawnCard;
-
-  const curIdx = gs.currentPlayerIndex;
-  const angle = -90 + curIdx * (360 / n);
-  const rad = angle * Math.PI / 180;
-  const x = Math.cos(rad) * (radius + 110);
-  const y = Math.sin(rad) * (radius + 110);
-  zone.style.left = `calc(50% + ${x}px)`;
-  zone.style.top = `calc(50% + ${y}px)`;
-  zone.style.transform = 'translate(-50%, -50%)';
 
   const me = roomData.players[myId];
   const canKeepCard = canKeep(myId, gs.drawnCard, gs);
@@ -1324,12 +1317,15 @@ async function endTurn(playerId) {
 
   const deckEmpty = !(gs.deck && gs.deck.length > 0);
 
+  const hasTargets = Object.entries(roomData.players || {}).some(([id, p]) => id !== myId && p.pile?.length > 0);
+
   if (
     playerId === myId &&
     hasUpgrade(player, 'thief_reflex') &&
     !(player.roundState?.stealUsed) &&
     top >= 80 &&
-    !deckEmpty
+    !deckEmpty &&
+    hasTargets
   ) {
     await roomRef.child('gameState/pendingSteal').set(myId);
     return;
@@ -1386,7 +1382,7 @@ async function advanceTurn(roundEnding) {
 
     const prevId = getCurrentPlayerId(gs);
     if (gs.tempTopModifier && gs.tempTopModifier[prevId]) {
-      delete gs.tempTopModifier[prevId];
+      gs.tempTopModifier[prevId] = null;
     }
 
     if (roundEnding || gs.phase === 'roundEnd') {
