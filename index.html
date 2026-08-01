@@ -282,6 +282,7 @@
                 <div id="deck-count-label" style="font-size:1.2rem; font-weight:700; color:var(--gold);">x0</div>
             </div>
             <button class="btn btn-sm" id="btn-draw">Draw</button>
+            <button class="btn btn-sm btn-secondary" id="btn-tutorial" style="margin-top:0.5rem;">📖 How to Play</button>
         </div>
         <div class="discard-row" id="discard-row"></div>
     </div>
@@ -294,6 +295,29 @@
         <h3>Risk It! Pick a card:</h3>
         <div style="display:flex;gap:1.5rem" id="risk-cards"></div>
     </div>
+</div>
+
+<!-- Tutorial Modal -->
+<div id="tutorial-modal" style="display:none; position:fixed; top:10%; left:10%; right:10%; background:var(--surface); color:var(--text); padding:20px; border:2px solid var(--accent); z-index:400; border-radius: 8px; max-width:500px; margin:0 auto;">
+    <h2 style="color:var(--accent)">How to Play!</h2>
+    <p><strong>Goal:</strong> Get the biggest pile! You add cards to your pile one by one.</p>
+    <p><strong>The Golden Rule:</strong> The new card you keep MUST be <em>higher</em> than the top card on your pile. If it's smaller, you can't keep it (unless you use special powers).</p>
+    <div style="margin: 15px 0; background: #1a2e1a; padding: 10px; border-radius: 5px;">
+        <p>✅ <b>SAFE:</b> Keeping a 10, then keeping a 20. Your pile is safe!</p>
+        <div style="display:flex; gap: 5px; align-items: center;">
+            <div class="mini-card" style="background:#2196f3; color:#fff">10</div> ➔
+            <div class="mini-card" style="background:#4caf50; color:#fff">20</div>
+        </div>
+    </div>
+    <div style="margin: 15px 0; background: #2e1a1a; padding: 10px; border-radius: 5px;">
+        <p>❌ <b>BLOCKED:</b> You have a 20, but draw a 5. The 5 is smaller! You must discard it (or use an ability).</p>
+        <div style="display:flex; gap: 5px; align-items: center;">
+            <div class="mini-card" style="background:#4caf50; color:#fff">20</div> ➔
+            <div class="mini-card" style="background:#2196f3; color:#fff">5</div> 🚫
+        </div>
+    </div>
+    <p>Use <b>Coins</b> to buy Upgrades that let you break the rules. Good luck!</p>
+    <button class="btn" id="btn-close-tutorial" style="width:auto;">Got it!</button>
 </div>
 
 <!-- Steal modal -->
@@ -408,17 +432,33 @@ let isHost = false;
 let shopAdvanceTriggered = false;
 let roundEndProcessed = false;
 let lastSabotageTurnIndex = -1;
+let wasMyTurn = false;
 
+// ── Audio Bell ──
+function playBell() {
+    try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = ctx.createOscillator(), g = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = 880;
+        g.gain.value = 0.3;
+        g.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.4);
+        osc.connect(g).connect(ctx.destination);
+        osc.start(); osc.stop(ctx.currentTime + 0.4);
+    } catch(e) {}
+}
+
+// ── Card color helper ──
 function cardColor(value) {
     const colors = ['#2196f3', '#4caf50', '#ffeb3b', '#ff9800', '#f44336', '#e91e63'];
     return colors[Math.max(0, Math.min(5, Math.floor(value / 17)))];
 }
 
+// ── Utility functions ──
 function normalizeDiscards(discards) {
     if (!Array.isArray(discards)) return [[], [], []];
     return [0, 1, 2].map(i => Array.isArray(discards[i]) ? discards[i] : []);
 }
-
 function shuffle(arr) {
     const a = [...arr];
     for (let i = a.length - 1; i > 0; i--) {
@@ -427,46 +467,32 @@ function shuffle(arr) {
     }
     return a;
 }
-
 function generateRoomCode() {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
     let code = '';
     for (let i = 0; i < 4; i++) code += chars[Math.floor(Math.random() * chars.length)];
     return code;
 }
-
 function deckSizeForPlayers(n) {
-    if (n <= 2) return 16;
-    if (n === 3) return 28;
-    if (n === 4) return 40;
-    return 50;
+    if (n <= 2) return 16; if (n === 3) return 28; if (n === 4) return 40; return 50;
 }
-
 function buildDeck(size) {
     const all = shuffle(Array.from({ length: 100 }, (_, i) => i + 1));
     return all.slice(0, size);
 }
-
 function showToast(msg) {
     const t = document.getElementById('toast');
-    t.textContent = msg;
-    t.classList.add('show');
+    t.textContent = msg; t.classList.add('show');
     setTimeout(() => t.classList.remove('show'), 2500);
 }
-
 function showScreen(id) {
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
     document.getElementById(id).classList.add('active');
 }
-
 function copyRoomCode(code) {
     navigator.clipboard.writeText(code).then(() => showToast('Room code copied!'));
 }
-
-function hasUpgrade(player, id) {
-    return (player?.upgrades || []).includes(id);
-}
-
+function hasUpgrade(player, id) { return (player?.upgrades || []).includes(id); }
 function defaultRoundState() {
     return {
         overchargeTurnsUsed: 0,
@@ -480,59 +506,45 @@ function defaultRoundState() {
         sabotageUsed: false,
     };
 }
-
 function getEffectiveTop(playerId, gs) {
     const player = roomData?.players?.[playerId];
     if (!player || !player.pile || player.pile.length === 0) return 0;
     let top = player.pile[player.pile.length - 1];
-    if (gs?.tempTopModifier && gs.tempTopModifier[playerId]) {
-        top += gs.tempTopModifier[playerId];
-    }
+    if (gs?.tempTopModifier && gs.tempTopModifier[playerId]) top += gs.tempTopModifier[playerId];
     return top;
 }
-
 function canKeep(playerId, drawnCard, gs) {
-    if (drawnCard === 0) return true; // Rock can always be kept
+    if (drawnCard === 0) return true; // Rock
     const player = roomData?.players?.[playerId];
     if (!player) return false;
     const pile = player.pile || [];
     if (pile.length === 0) return true;
     return drawnCard > getEffectiveTop(playerId, gs);
 }
-
 function canTakeFromDiscard(playerId, card, gs) {
-    if (card === 0) return true; // Rock can always be taken
+    if (card === 0) return true; // Rock
     const player = roomData?.players?.[playerId];
     if (!player) return false;
     const pile = player.pile || [];
     if (pile.length === 0) return true;
     return card > getEffectiveTop(playerId, gs);
 }
-
 function reverseDigits(n) {
     if (n < 10 || n > 99) return n;
     return parseInt(String(n).split('').reverse().join(''), 10);
 }
-
 function getCurrentPlayerId(gs) {
     if (!gs) return null;
     const order = gs.turnOrder || roomData?.turnOrder || [];
     return order[gs.currentPlayerIndex || 0];
 }
+function amCurrentPlayer(gs) { return getCurrentPlayerId(gs) === myId; }
 
-function amCurrentPlayer(gs) {
-    return getCurrentPlayerId(gs) === myId;
-}
+// ── Auth ──
+auth.signInAnonymously().catch(err => { console.error('Auth failed:', err); showToast('Failed to connect. Refresh the page.'); });
+auth.onAuthStateChanged(user => { if (user) myId = user.uid; });
 
-auth.signInAnonymously().catch(err => {
-    console.error('Auth failed:', err);
-    showToast('Failed to connect. Refresh the page.');
-});
-
-auth.onAuthStateChanged(user => {
-    if (user) myId = user.uid;
-});
-
+// ── UI Event Handlers ──
 document.getElementById('btn-create').onclick = async () => {
     const name = document.getElementById('player-name').value.trim();
     if (!name) return showToast('Enter your name');
@@ -639,22 +651,17 @@ document.getElementById('btn-start').onclick = async () => {
         players,
         gameState: {
             started: true, phase: 'playing', round: 1, totalRounds,
-            turnOrder: shuffledOrder,
-            deck, discards: [[], [], []],
-            currentPlayerIndex: 0,
-            turnPhase: 'action',
-            drawnCard: null,
+            turnOrder: shuffledOrder, deck, discards: [[], [], []],
+            currentPlayerIndex: 0, turnPhase: 'action', drawnCard: null,
             turnDeadline: Date.now() + TURN_SECONDS * 1000,
-            winner: null,
-            shopOpen: false, shopReady: {}, roundResults: {}, totalScores: {},
-            riskCards: null,
-            tempTopModifier: {},
-            pendingSteal: null, pendingSabotage: null,
+            winner: null, shopOpen: false, shopReady: {}, roundResults: {}, totalScores: {},
+            riskCards: null, tempTopModifier: {}, pendingSteal: null, pendingSabotage: null,
             glassCards
         }
     });
 };
 
+// ── Firebase listener ──
 function onRoomUpdate(snap) {
     if (!snap.exists()) { leaveRoom(); return; }
     roomData = snap.val();
@@ -688,13 +695,9 @@ function renderWaitingRoom() {
     document.getElementById('btn-start').disabled = !isHost || Object.keys(players).length < 2;
     document.getElementById('rounds-panel').style.display = isHost ? 'block' : 'none';
 }
+function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
-function escapeHtml(s) {
-    const d = document.createElement('div');
-    d.textContent = s;
-    return d.innerHTML;
-}
-
+// ── Render Game ──
 function renderGame() {
     const gs = roomData.gameState;
     const players = roomData.players || {};
@@ -766,9 +769,12 @@ function renderGame() {
 
     document.getElementById('deck-count-label').textContent = 'x' + (gs.deck || []).length;
 
-    const isMyTurn = amCurrentPlayer(gs);
-    const canAct = isMyTurn && gs.turnPhase === 'action' && gs.phase === 'playing';
-    document.getElementById('btn-draw').disabled = !canAct || (gs.deck || []).length === 0;
+    const isMyTurn = amCurrentPlayer(gs) && gs.turnPhase === 'action' && gs.phase === 'playing';
+    document.getElementById('btn-draw').disabled = !isMyTurn || (gs.deck || []).length === 0;
+
+    // Bell trigger
+    if (amCurrentPlayer(gs) && !wasMyTurn) playBell();
+    wasMyTurn = amCurrentPlayer(gs);
 
     const discardRow = document.getElementById('discard-row');
     discardRow.innerHTML = '';
@@ -782,7 +788,7 @@ function renderGame() {
             <div class="card ${top !== null && top <= 10 ? 'red' : ''} ${top !== null ? '' : 'empty-slot'}" style="${bgStyle}">${top !== null ? top : 'Empty'}</div>
             <div class="pile-label">Pile ${idx + 1}</div>
         `;
-        if (canAct && top !== null) {
+        if (isMyTurn && top !== null) {
             const takeBtn = document.createElement('button');
             takeBtn.className = 'btn btn-sm btn-secondary';
             takeBtn.textContent = 'Take';
@@ -798,6 +804,7 @@ function renderGame() {
     renderAbilityBar(gs);
     renderRiskZone(gs);
 
+    // Automatic sabotage prompt
     if (amCurrentPlayer(gs) && gs.turnPhase === 'action' && gs.phase === 'playing' &&
         !gs.pendingSteal && !gs.drawnCard && gs.pendingSabotage !== myId &&
         lastSabotageTurnIndex !== gs.currentPlayerIndex) {
@@ -816,12 +823,10 @@ function renderDrawnZone(gs) {
     const zone = document.getElementById('drawn-zone');
     const btns = document.getElementById('action-buttons');
     btns.innerHTML = '';
-
     if (gs.turnPhase !== 'deciding' || gs.drawnCard === null || !amCurrentPlayer(gs)) {
         zone.classList.remove('visible');
         return;
     }
-
     zone.classList.add('visible');
     const cardVal = gs.drawnCard;
     const cardEl = document.getElementById('drawn-card-el');
@@ -926,26 +931,7 @@ function renderSabotageModal(gs) {
     });
 }
 
-document.getElementById('btn-skip-steal').onclick = () => skipSteal();
-document.getElementById('btn-skip-sabotage').onclick = () => skipSabotage();
-document.getElementById('btn-cancel-flip').onclick = () => {
-    document.getElementById('flip-modal').classList.remove('visible');
-};
-
-function openFlipModal() {
-    const me = roomData.players[myId];
-    const pile = me.pile || [];
-    const targets = document.getElementById('flip-targets');
-    targets.innerHTML = '';
-    pile.forEach((card, idx) => {
-        if (card >= 10 && card <= 99) {
-            const flipped = reverseDigits(card);
-            targets.appendChild(mkBtn(`${card} → ${flipped}`, 'btn-secondary', () => executeFlip(idx)));
-        }
-    });
-    document.getElementById('flip-modal').classList.add('visible');
-}
-
+// ── Game Actions ──
 async function drawCard() {
     const ref = roomRef.child('gameState');
     await ref.transaction(gs => {
@@ -955,8 +941,7 @@ async function drawCard() {
         if (!gs.deck || gs.deck.length === 0) return;
 
         const player = roomData.players[myId];
-
-        // Rocky check
+        // Rocky
         if (hasUpgrade(player, 'rocky') && Math.floor(Math.random() * 15) === 0) {
             gs.drawnCard = 0;
             gs.turnPhase = 'deciding';
@@ -965,7 +950,6 @@ async function drawCard() {
         }
 
         let card = gs.deck.pop();
-
         if (hasUpgrade(player, 'risk_it') && !(player.roundState?.riskItUsed)) {
             const roll = Math.floor(Math.random() * 7) + 1;
             if (roll === 1) {
@@ -1181,14 +1165,12 @@ async function rerollCard() {
         const order = gs.turnOrder || [];
         if (order[gs.currentPlayerIndex] !== myId) return;
         if (!gs.deck || gs.deck.length === 0) return;
-
         const card = gs.drawnCard;
         const discards = normalizeDiscards(gs.discards);
         const emptyIdx = discards.findIndex(p => p.length === 0);
         const discardIdx = emptyIdx !== -1 ? emptyIdx : 0;
         discards[discardIdx].push(card);
         gs.discards = discards;
-
         gs.drawnCard = gs.deck.pop();
         gs._rerollUpdate = needsCoin ? 'paid' : 'free';
         gs.turnDeadline = Date.now() + TURN_SECONDS * 1000;
@@ -1214,10 +1196,7 @@ async function takeFromDiscard(pileIdx) {
         const pile = discards[pileIdx];
         if (!pile || pile.length === 0) return;
         const card = pile.pop();
-        if (!canTakeFromDiscard(myId, card, gs)) {
-            pile.push(card);
-            return;
-        }
+        if (!canTakeFromDiscard(myId, card, gs)) { pile.push(card); return; }
         gs.discards = discards;
         gs._takeCard = card;
         gs._endTurn = true;
@@ -1246,16 +1225,10 @@ async function cullWeak() {
         const pile = [...(player.pile || [])];
         if (pile.length < 4) return;
         if (player.roundState?.cullUsed) return;
-        const idx1 = Math.floor(Math.random() * pile.length);
-        pile.splice(idx1, 1);
-        const idx2 = Math.floor(Math.random() * pile.length);
-        pile.splice(idx2, 1);
+        const idx1 = Math.floor(Math.random() * pile.length); pile.splice(idx1, 1);
+        const idx2 = Math.floor(Math.random() * pile.length); pile.splice(idx2, 1);
         pile.sort((a, b) => a - b);
-        if (pile.length >= 2) {
-            const secondLowest = pile[1];
-            pile.splice(1, 1);
-            pile.push(secondLowest);
-        }
+        if (pile.length >= 2) { const second = pile[1]; pile.splice(1, 1); pile.push(second); }
         player.pile = pile;
         player.roundState = player.roundState || defaultRoundState();
         player.roundState.cullUsed = true;
@@ -1291,18 +1264,10 @@ async function endTurn(playerId) {
     const deckEmpty = !(gs.deck && gs.deck.length > 0);
     const hasTargets = Object.entries(roomData.players || {}).some(([id, p]) => id !== myId && p.pile?.length > 0);
 
-    if (
-        playerId === myId &&
-        hasUpgrade(player, 'thief_reflex') &&
-        !(player.roundState?.stealUsed) &&
-        top >= 80 &&
-        !deckEmpty &&
-        hasTargets
-    ) {
+    if (playerId === myId && hasUpgrade(player, 'thief_reflex') && !(player.roundState?.stealUsed) && top >= 80 && !deckEmpty && hasTargets) {
         await roomRef.child('gameState/pendingSteal').set(myId);
         return;
     }
-
     await advanceTurn(deckEmpty);
 }
 
@@ -1318,11 +1283,7 @@ async function executeSteal(targetId) {
     const target = roomData.players[targetId];
     if (!target?.pile?.length) return skipSteal();
     const stolen = target.pile[target.pile.length - 1];
-    await roomRef.child('players/' + targetId + '/pile').transaction(pile => {
-        pile = pile || [];
-        pile.pop();
-        return pile;
-    });
+    await roomRef.child('players/' + targetId + '/pile').transaction(pile => { pile = pile || []; pile.pop(); return pile; });
     await roomRef.child('players/' + myId + '/pile').transaction(pile => {
         pile = pile || [];
         if (pile.length > 0) pile[pile.length - 1] = stolen;
@@ -1350,11 +1311,8 @@ async function executeSabotage(targetId) {
 async function advanceTurn(roundEnding) {
     await roomRef.child('gameState').transaction(gs => {
         if (!gs) return;
-
         const prevId = getCurrentPlayerId(gs);
-        if (gs.tempTopModifier && gs.tempTopModifier[prevId]) {
-            gs.tempTopModifier[prevId] = null;
-        }
+        if (gs.tempTopModifier && gs.tempTopModifier[prevId]) gs.tempTopModifier[prevId] = null;
 
         if (roundEnding || gs.phase === 'roundEnd') {
             gs.phase = 'roundEnd';
@@ -1362,7 +1320,6 @@ async function advanceTurn(roundEnding) {
             gs.drawnCard = null;
             return gs;
         }
-
         const order = gs.turnOrder || [];
         gs.currentPlayerIndex = (gs.currentPlayerIndex + 1) % order.length;
         gs.turnPhase = 'action';
@@ -1381,9 +1338,7 @@ async function advanceTurn(roundEnding) {
             const p = pSnap.val();
             if (p && p.pile && gs.glassCards && gs.glassCards.length > 0) {
                 const newPile = p.pile.filter(c => {
-                    if (gs.glassCards.includes(c)) {
-                        return Math.random() >= (1/6);
-                    }
+                    if (gs.glassCards.includes(c)) return Math.random() >= (1/6);
                     return true;
                 });
                 if (newPile.length !== p.pile.length) {
@@ -1404,8 +1359,7 @@ async function processRoundEnd() {
     const gs = roomData.gameState;
     const players = roomData.players || {};
 
-    let maxCards = -1;
-    let winners = [];
+    let maxCards = -1, winners = [];
     const piles = {}, tops = {};
     Object.entries(players).forEach(([pid, p]) => {
         const pile = p.pile || [];
@@ -1414,10 +1368,8 @@ async function processRoundEnd() {
         if (pile.length > maxCards) { maxCards = pile.length; winners = [pid]; }
         else if (pile.length === maxCards) winners.push(pid);
     });
-
     if (winners.length > 1) {
-        let minTop = Infinity;
-        let tieWinners = [];
+        let minTop = Infinity; let tieWinners = [];
         winners.forEach(pid => {
             if (tops[pid] < minTop) { minTop = tops[pid]; tieWinners = [pid]; }
             else if (tops[pid] === minTop) tieWinners.push(pid);
@@ -1425,8 +1377,7 @@ async function processRoundEnd() {
         winners = tieWinners;
     }
 
-    let minTop = Infinity;
-    let lowTopPlayers = [];
+    let minTop = Infinity; let lowTopPlayers = [];
     Object.entries(tops).forEach(([pid, top]) => {
         if (top < minTop) { minTop = top; lowTopPlayers = [pid]; }
         else if (top === minTop) lowTopPlayers.push(pid);
@@ -1441,7 +1392,6 @@ async function processRoundEnd() {
         updates[`players/${pid}/coins`] = coins;
         updates[`players/${pid}/roundState`] = defaultRoundState();
     });
-
     updates['gameState/roundResults'] = { round: gs.round, piles, winners, lowTopBonus: lowTopPlayers };
     const totalScores = gs.totalScores || {};
     Object.keys(players).forEach(pid => {
@@ -1467,23 +1417,19 @@ async function processRoundEnd() {
 
 async function openShopHost() {
     if (!isHost) return;
-    shopAdvanceTriggered = false;
-    roundEndProcessed = false;
-
+    shopAdvanceTriggered = false; roundEndProcessed = false;
     const offerings = {};
     Object.entries(roomData.players || {}).forEach(([pid, p]) => {
         const owned = p.upgrades || [];
         const avail = shuffle(UPGRADES.filter(u => !owned.includes(u.id)));
         offerings[pid] = avail.slice(0, 3).map(u => u.id);
     });
-
     await roomRef.child('gameState').update({
         phase: 'shop', shopOpen: true,
         shopDeadline: Date.now() + SHOP_SECONDS * 1000,
         shopReady: {}, shopOfferings: offerings
     });
 }
-
 function findGrandWinner(totalScores) {
     let max = -1, winners = [];
     Object.entries(totalScores).forEach(([pid, score]) => {
@@ -1500,31 +1446,19 @@ function renderRoundOverlay() {
     const overlay = document.getElementById('round-overlay');
     overlay.classList.add('visible');
     document.getElementById('round-overlay-title').textContent = `Round ${rr.round} Complete`;
-
     const table = document.getElementById('round-results-table');
     table.innerHTML = '<tr><th>Player</th><th>Cards</th><th>Top</th></tr>';
     Object.entries(rr.piles || {}).forEach(([pid, pile]) => {
         const p = roomData.players?.[pid] || {};
         const isWinner = rr.winners.includes(pid);
-        table.innerHTML += `<tr class="${isWinner ? 'winner-row' : ''}">
-            <td>${escapeHtml(p.name || '')}${isWinner ? ' 👑' : ''}</td>
-            <td>${pile.length}</td>
-            <td>${pile.length ? pile[pile.length-1] : 0}</td>
-        </tr>`;
+        table.innerHTML += `<tr class="${isWinner ? 'winner-row' : ''}"><td>${escapeHtml(p.name || '')}${isWinner ? ' 👑' : ''}</td><td>${pile.length}</td><td>${pile.length ? pile[pile.length-1] : 0}</td></tr>`;
     });
-
-    document.getElementById('round-coin-msg').textContent = 'Everyone received 3 coins' +
-        (rr.lowTopBonus?.length ? ` (+1 bonus for lowest top: ${rr.lowTopBonus.map(id => roomData.players[id]?.name || id).join(', ')})` : '');
-
+    document.getElementById('round-coin-msg').textContent = 'Everyone received 3 coins' + (rr.lowTopBonus?.length ? ` (+1 bonus for lowest top: ${rr.lowTopBonus.map(id => roomData.players[id]?.name || id).join(', ')})` : '');
     const isFinal = gs.round >= gs.totalRounds;
     document.getElementById('round-next-msg').textContent = isFinal ? 'Calculating final scores…' : 'Shop opening…';
-
     const forceBtn = document.getElementById('btn-force-shop');
-    if (isHost && !isFinal) {
-        forceBtn.style.display = 'inline-block';
-        forceBtn.onclick = () => openShopHost();
-    } else forceBtn.style.display = 'none';
-
+    if (isHost && !isFinal) { forceBtn.style.display = 'inline-block'; forceBtn.onclick = () => openShopHost(); }
+    else forceBtn.style.display = 'none';
     if (gs.phase !== 'roundEnd') overlay.classList.remove('visible');
 }
 
@@ -1534,36 +1468,29 @@ function renderFinale() {
     const overlay = document.getElementById('finale-overlay');
     overlay.classList.add('visible');
     document.getElementById('round-overlay').classList.remove('visible');
-
     const table = document.getElementById('finale-table');
     table.innerHTML = '<tr><th>Player</th><th>Total Cards</th><th>Coins Left</th></tr>';
     const scores = gs.totalScores || {};
     const sorted = Object.entries(scores).sort((a, b) => b[1] - a[1]);
     sorted.forEach(([pid, score], i) => {
         const p = roomData.players[pid] || {};
-        table.innerHTML += `<tr class="${i === 0 ? 'winner-row' : ''}">
-            <td>${escapeHtml(p.name || '')}${i === 0 ? ' 🏆' : ''}</td>
-            <td>${score}</td>
-            <td>${p.coins || 0}</td>
-        </tr>`;
+        table.innerHTML += `<tr class="${i === 0 ? 'winner-row' : ''}"><td>${escapeHtml(p.name || '')}${i === 0 ? ' 🏆' : ''}</td><td>${score}</td><td>${p.coins || 0}</td></tr>`;
     });
 }
 
 document.getElementById('btn-back-lobby').onclick = leaveRoom;
 
+// ── Shop ──
 function renderShop() {
     showScreen('shop-screen');
     document.getElementById('round-overlay').classList.remove('visible');
     const gs = roomData.gameState;
     const me = roomData.players[myId];
-
     document.getElementById('shop-coins').textContent = `🪙 ${me?.coins || 0} coins`;
     updateShopTimerDisplay(gs.shopDeadline);
-
     const grid = document.getElementById('upgrade-grid');
     grid.innerHTML = '';
     const myOfferings = gs.shopOfferings?.[myId] || [];
-
     myOfferings.forEach(uId => {
         const up = UPGRADES.find(u => u.id === uId);
         if (!up) return;
@@ -1572,32 +1499,19 @@ function renderShop() {
         const div = document.createElement('div');
         div.className = 'upgrade-card';
         div.innerHTML = `
-            <div class="upgrade-info">
-                <div class="upgrade-name">${up.name}</div>
-                <div class="upgrade-desc">${up.desc}</div>
-            </div>
-            <div>
-                ${owned
-                    ? '<span class="upgrade-owned">Owned</span>'
-                    : `<span class="upgrade-cost">${up.cost} 🪙</span>
-                       <button class="btn btn-sm btn-gold" ${canBuy ? '' : 'disabled'}>Buy</button>`}
-            </div>
+            <div class="upgrade-info"><div class="upgrade-name">${up.name}</div><div class="upgrade-desc">${up.desc}</div></div>
+            <div>${owned ? '<span class="upgrade-owned">Owned</span>' : `<span class="upgrade-cost">${up.cost} 🪙</span><button class="btn btn-sm btn-gold" ${canBuy ? '' : 'disabled'}>Buy</button>`}</div>
         `;
         if (!owned) div.querySelector('button').onclick = () => buyUpgrade(up.id, up.cost);
         grid.appendChild(div);
     });
-
     const ready = gs.shopReady || {};
     const total = Object.keys(roomData.players || {}).length;
     const readyCount = Object.values(ready).filter(Boolean).length;
     document.getElementById('ready-status').textContent = `${readyCount}/${total} players ready`;
     document.getElementById('btn-shop-ready').disabled = !!ready[myId];
     document.getElementById('btn-shop-ready').textContent = ready[myId] ? 'Ready ✓' : 'Ready';
-
-    if (isHost && readyCount >= total && total > 0 && !shopAdvanceTriggered) {
-        shopAdvanceTriggered = true;
-        startNextRound();
-    }
+    if (isHost && readyCount >= total && total > 0 && !shopAdvanceTriggered) { shopAdvanceTriggered = true; startNextRound(); }
 }
 
 document.getElementById('btn-shop-ready').onclick = async () => {
@@ -1624,7 +1538,6 @@ async function startNextRound() {
     if (!isHost) return;
     const gs = roomData.gameState;
     if (gs.phase !== 'shop') return;
-
     const playerIds = Object.keys(roomData.players);
     const shuffledOrder = shuffle(playerIds);
     const size = deckSizeForPlayers(playerIds.length);
@@ -1632,11 +1545,7 @@ async function startNextRound() {
 
     const players = { ...roomData.players };
     for (const pid of playerIds) {
-        players[pid] = {
-            ...players[pid],
-            pile: [],
-            roundState: defaultRoundState(),
-        };
+        players[pid] = { ...players[pid], pile: [], roundState: defaultRoundState() };
         if (hasUpgrade(players[pid], 'small_start')) {
             const lowCards = deck.filter(c => c < 40);
             if (lowCards.length > 0) {
@@ -1650,46 +1559,32 @@ async function startNextRound() {
     let glassCount = 0;
     Object.values(players).forEach(p => { if (hasUpgrade(p, 'glass')) glassCount += 5; });
     let glassCards = [];
-    if (glassCount > 0) {
-        const shuffled = shuffle([...deck]);
-        glassCards = shuffled.slice(0, glassCount);
-    }
+    if (glassCount > 0) { const shuffled = shuffle([...deck]); glassCards = shuffled.slice(0, glassCount); }
 
     await roomRef.update({
-        turnOrder: shuffledOrder,
-        players,
+        turnOrder: shuffledOrder, players,
         gameState: {
-            ...gs,
-            phase: 'playing', round: gs.round + 1,
-            turnOrder: shuffledOrder, deck,
-            discards: [[], [], []],
-            currentPlayerIndex: 0,
-            turnPhase: 'action',
-            drawnCard: null,
+            ...gs, phase: 'playing', round: gs.round + 1,
+            turnOrder: shuffledOrder, deck, discards: [[], [], []],
+            currentPlayerIndex: 0, turnPhase: 'action', drawnCard: null,
             turnDeadline: Date.now() + TURN_SECONDS * 1000,
-            shopOpen: false, shopReady: {},
-            roundResults: {}, riskCards: null,
-            tempTopModifier: {},
-            pendingSteal: null, pendingSabotage: null,
-            shopOfferings: null,
-            glassCards
+            shopOpen: false, shopReady: {}, roundResults: {}, riskCards: null,
+            tempTopModifier: {}, pendingSteal: null, pendingSabotage: null, shopOfferings: null, glassCards
         }
     });
 }
 
+// ── Timers ──
 function updateTimerDisplay(deadline) {
     clearInterval(timerInterval);
     const el = document.getElementById('timer');
     function tick() {
         if (!deadline) { el.textContent = '--'; return; }
         const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
-        el.textContent = remaining;
-        el.classList.toggle('urgent', remaining <= 5);
+        el.textContent = remaining; el.classList.toggle('urgent', remaining <= 5);
     }
-    tick();
-    timerInterval = setInterval(tick, 250);
+    tick(); timerInterval = setInterval(tick, 250);
 }
-
 function updateShopTimerDisplay(deadline) {
     clearInterval(shopTimerInterval);
     const el = document.getElementById('shop-timer');
@@ -1698,15 +1593,12 @@ function updateShopTimerDisplay(deadline) {
         const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
         el.textContent = remaining;
     }
-    tick();
-    shopTimerInterval = setInterval(tick, 250);
+    tick(); shopTimerInterval = setInterval(tick, 250);
 }
-
 async function checkTurnTimeout(gs) {
     if (gs.phase !== 'playing' || !gs.turnDeadline) return;
     if (Date.now() < gs.turnDeadline) return;
     if (getCurrentPlayerId(gs) !== myId) return;
-
     if (gs.turnPhase === 'deciding' && gs.drawnCard !== null) {
         const discards = normalizeDiscards(gs.discards);
         const emptyIdx = discards.findIndex(p => p.length === 0);
@@ -1719,16 +1611,39 @@ async function checkTurnTimeout(gs) {
         await endTurn(myId);
     }
 }
-
 async function checkShopTimeout(gs) {
     if (gs.phase !== 'shop' || !gs.shopDeadline) return;
     if (Date.now() < gs.shopDeadline) return;
     const updates = {};
-    Object.keys(roomData.players || {}).forEach(pid => {
-        updates[`gameState/shopReady/${pid}`] = true;
-    });
+    Object.keys(roomData.players || {}).forEach(pid => { updates[`gameState/shopReady/${pid}`] = true; });
     await roomRef.update(updates);
     if (isHost) setTimeout(() => startNextRound(), 500);
+}
+
+// ── Tutorial modal controls ──
+document.getElementById('btn-tutorial').onclick = () => {
+    document.getElementById('tutorial-modal').style.display = 'block';
+};
+document.getElementById('btn-close-tutorial').onclick = () => {
+    document.getElementById('tutorial-modal').style.display = 'none';
+};
+
+// Steal/Sabotage skip buttons
+document.getElementById('btn-skip-steal').onclick = () => skipSteal();
+document.getElementById('btn-skip-sabotage').onclick = () => skipSabotage();
+document.getElementById('btn-cancel-flip').onclick = () => document.getElementById('flip-modal').classList.remove('visible');
+function openFlipModal() {
+    const me = roomData.players[myId];
+    const pile = me.pile || [];
+    const targets = document.getElementById('flip-targets');
+    targets.innerHTML = '';
+    pile.forEach((card, idx) => {
+        if (card >= 10 && card <= 99) {
+            const flipped = reverseDigits(card);
+            targets.appendChild(mkBtn(`${card} → ${flipped}`, 'btn-secondary', () => executeFlip(idx)));
+        }
+    });
+    document.getElementById('flip-modal').classList.add('visible');
 }
 </script>
 </body>
