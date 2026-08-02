@@ -47,14 +47,14 @@
         .player-name{font-weight:700;font-size:clamp(0.8rem,1.3vmin,1.1rem);margin-bottom:4px}
         .player-meta{font-size:clamp(0.7rem,1vmin,0.85rem);color:var(--muted);margin-bottom:6px}
         .player-cards{display:flex;justify-content:center;gap:4px;flex-wrap:wrap;width:100%}
-        .mini-card{width:clamp(32px,4vmin,50px);height:clamp(42px,5.5vmin,68px);border-radius:4px;background:linear-gradient(135deg,#fff 0%,#ddd 100%);color:#222;font-size:clamp(0.7rem,1.2vmin,1rem);font-weight:700;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 4px rgba(0,0,0,.3)}
+        .mini-card{width:clamp(32px,4vmin,50px);height:clamp(42px,5.5vmin,68px);border-radius:4px;background:linear-gradient(135deg,#fff 0%,#ddd 100%);color:#222;font-size:clamp(0.7rem,1.2vmin,1rem);font-weight:700;display:flex;align-items:center;justify-content:center;flex-direction:column;box-shadow:0 2px 4px rgba(0,0,0,.3)}
         #table-center{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:clamp(0.5rem,1.5vmin,1.2rem);z-index:10}
         .deck-stack{width:var(--card-w);height:var(--card-h);background:linear-gradient(135deg,var(--accent2),#1a0a3e);border-radius:8px;border:2px solid #666;display:flex;align-items:center;justify-content:center;font-size:clamp(0.8rem,1.5vmin,1.1rem);color:var(--muted);box-shadow:0 4px 12px rgba(0,0,0,.4)}
         .discard-row{display:flex;gap:clamp(0.5rem,1.5vmin,1.2rem)}
         .discard-pile{text-align:center;min-width:var(--card-w)}
         .discard-pile .card{margin:0 auto .4rem}
         .pile-label{font-size:clamp(0.65rem,1vmin,0.8rem);color:var(--muted)}
-        .card{width:var(--card-w);height:var(--card-h);background:linear-gradient(145deg,#fff 0%,#e8e8e8 50%,#ccc 100%);border-radius:8px;border:2px solid #aaa;display:flex;align-items:center;justify-content:center;font-size:clamp(1.3rem,2.5vmin,2.2rem);font-weight:800;color:#222;box-shadow:0 4px 12px rgba(0,0,0,.35);transition:transform .3s,box-shadow .3s}
+        .card{width:var(--card-w);height:var(--card-h);background:linear-gradient(145deg,#fff 0%,#e8e8e8 50%,#ccc 100%);border-radius:8px;border:2px solid #aaa;display:flex;align-items:center;justify-content:center;flex-direction:column;font-size:clamp(1.3rem,2.5vmin,2.2rem);font-weight:800;color:#222;box-shadow:0 4px 12px rgba(0,0,0,.35);transition:transform .3s,box-shadow .3s}
         .card.red{color:var(--accent)}
         .card.drawn-highlight{animation:cardPop .4s ease;box-shadow:0 0 20px var(--gold)}
         @keyframes cardPop{0%{transform:scale(.5) rotate(-10deg);opacity:0}100%{transform:scale(1) rotate(0);opacity:1}}
@@ -241,6 +241,8 @@ db.ref('.info/serverTimeOffset').on('value', snap => serverTimeOffset = snap.val
 function now() { return Date.now() + serverTimeOffset; }
 
 const getSuit = (v) => ['Spades', 'Diamonds', 'Clubs', 'Hearts'][v % 4];
+const suitSymbols = { Hearts: '♥', Diamonds: '♦', Clubs: '♣', Spades: '♠' };
+function getSuitSymbol(v) { return suitSymbols[getSuit(v)] || ''; }
 
 const UPGRADES = [
     { id: 'overcharge', name: 'Overcharge', cost: 3, desc: 'First 2 turns each round: treat drawn card as +20 for Keep check.' },
@@ -445,7 +447,14 @@ function renderGame() {
         slot.className = 'player-slot' + (pid === getCurrentPlayerId(gs) ? ' active-turn' : '');
         slot.style.left = (Math.cos(rad) * radius) + 'px'; slot.style.top = (Math.sin(rad) * radius) + 'px';
         slot.style.transform = `translate(-50%, -50%) rotate(${-rotDeg}deg)`;
-        const cardsHtml = pile.length ? pile.map(c => `<div class="mini-card" style="background:${cardColor(c)}; color:#fff; ${(gs.glassCards||[]).includes(c)?'border: 2px solid cyan;':''}">${c}</div>`).join('') : '<span style="color:var(--muted);font-size:.75rem">empty</span>';
+        // Cards with suit symbols
+        const cardsHtml = pile.length ? pile.map(c => {
+            const sym = getSuitSymbol(c);
+            return `<div class="mini-card" style="background:${cardColor(c)}; color:#fff; ${(gs.glassCards||[]).includes(c)?'border: 2px solid cyan;':''}">
+                <span style="font-weight:700; font-size:0.9em;">${c}</span>
+                <span style="font-size:0.7em; line-height:1;">${sym}</span>
+            </div>`;
+        }).join('') : '<span style="color:var(--muted);font-size:.75rem">empty</span>';
         slot.innerHTML = `<div class="player-name">${escapeHtml(p.name || '')}${pid===myId?' (you)':''}</div><div class="player-meta">${pile.length} cards · top: ${pile.length?pile[pile.length-1]:0}${gs.tempTopModifier?.[pid]?` (+${gs.tempTopModifier[pid]})`:''}</div><div class="player-cards">${cardsHtml}</div><div style="display:flex; flex-wrap:wrap; gap:4px; justify-content:center; margin-top:6px;">${(p.upgrades||[]).map(uId => `<div style="font-size:0.65rem; background:var(--accent2); padding:2px 4px; border-radius:4px;">${UPGRADES.find(up=>up.id===uId)?.name||uId}</div>`).join('')}</div>`;
         ring.appendChild(slot);
     });
@@ -458,8 +467,12 @@ function renderGame() {
 
     const discardRow = document.getElementById('discard-row'); discardRow.innerHTML = '';
     normalizeDiscards(gs.discards).forEach((pile, idx) => {
-        const top = pile.length ? pile[pile.length - 1] : null, div = document.createElement('div'); div.className = 'discard-pile';
-        div.innerHTML = `<div class="card ${top!==null&&top<=10?'red':''} ${top!==null?'':'empty-slot'}" style="${top!==null?`background:${cardColor(top)}; color:#fff;`:''}">${top!==null?top:'Empty'}</div><div class="pile-label">Pile ${idx + 1}</div>`;
+        const top = pile.length ? pile[pile.length - 1] : null;
+        const sym = top !== null ? getSuitSymbol(top) : '';
+        const div = document.createElement('div'); div.className = 'discard-pile';
+        div.innerHTML = `<div class="card ${top!==null&&top<=10?'red':''} ${top!==null?'':'empty-slot'}" style="${top!==null?`background:${cardColor(top)}; color:#fff;`:''}">
+            ${top!==null?`<span style="font-size:1em;">${top}</span><span style="font-size:0.6em; line-height:1;">${sym}</span>`:'Empty'}
+        </div><div class="pile-label">Pile ${idx + 1}</div>`;
         if (amCurrentPlayer(gs) && gs.turnPhase === 'action' && top !== null) {
             const btn = document.createElement('button'); btn.className = 'btn btn-sm btn-secondary'; btn.textContent = 'Take'; btn.disabled = !canTakeFromDiscard(myId, top, gs, {players: roomData.players}); btn.onclick = () => takeFromDiscard(idx); div.appendChild(btn);
         }
@@ -478,7 +491,12 @@ function renderGame() {
 function renderDrawnZone(gs) {
     const zone = document.getElementById('drawn-zone'), btns = document.getElementById('action-buttons'); btns.innerHTML = '';
     if (gs.turnPhase !== 'deciding' || gs.drawnCard === null || !amCurrentPlayer(gs)) return zone.classList.remove('visible');
-    zone.classList.add('visible'); const cardEl = document.getElementById('drawn-card-el'); cardEl.textContent = gs.drawnCard; cardEl.style.background = cardColor(gs.drawnCard); cardEl.style.color = '#fff';
+    zone.classList.add('visible');
+    const cardEl = document.getElementById('drawn-card-el');
+    const sym = getSuitSymbol(gs.drawnCard);
+    cardEl.innerHTML = `<span style="font-size:1em;">${gs.drawnCard}</span><span style="font-size:0.7em; line-height:1;">${sym}</span>`;
+    cardEl.style.background = cardColor(gs.drawnCard);
+    cardEl.style.color = '#fff';
     
     const me = roomData.players[myId];
     if (canKeep(myId, gs.drawnCard, gs, {players: roomData.players})) btns.appendChild(mkBtn('Keep', 'btn-green', () => keepCard()));
@@ -506,7 +524,6 @@ function renderAbilityBar(gs) {
     }
     if (hasUpgrade(me, 'cull_weak') && !me.roundState?.cullUsed && (me.pile||[]).length >= 4) bar.appendChild(mkBtn('Cull the Weak', 'btn-gold', () => cullWeak()));
     
-    // Burn suit buttons (one-time use)
     ['burn_hearts','burn_diamonds','burn_clubs','burn_spades'].forEach(burnId => {
         if (hasUpgrade(me, burnId) && !me[burnId + '_used']) {
             const suit = burnId.split('_')[1];
@@ -515,7 +532,6 @@ function renderAbilityBar(gs) {
         }
     });
 
-    // Eagle Eye (best draw) – updated behaviour
     if (hasUpgrade(me, 'best_draw') && !me.roundState?.bestDrawUsed) {
         bar.appendChild(mkBtn('Eagle Eye', 'btn-gold', () => executeBestDraw()));
     }
@@ -525,7 +541,15 @@ function renderRiskZone(gs) {
     const zone = document.getElementById('risk-zone'), cards = document.getElementById('risk-cards');
     if (gs.turnPhase !== 'risking' || !amCurrentPlayer(gs) || !gs.riskCards) return zone.classList.remove('visible');
     zone.classList.add('visible'); cards.innerHTML = '';
-    gs.riskCards.forEach((card, i) => { const div = document.createElement('div'); div.style.textAlign = 'center'; div.innerHTML = `<div class="card drawn-highlight" style="background:${cardColor(card)}; color:#fff;">${card}</div>`; div.appendChild(mkBtn('Pick', 'btn-green', () => pickRiskCard(i))); cards.appendChild(div); });
+    gs.riskCards.forEach((card, i) => {
+        const sym = getSuitSymbol(card);
+        const div = document.createElement('div'); div.style.textAlign = 'center';
+        div.innerHTML = `<div class="card drawn-highlight" style="background:${cardColor(card)}; color:#fff;">
+            <span style="font-size:1em;">${card}</span><span style="font-size:0.7em; line-height:1;">${sym}</span>
+        </div>`;
+        div.appendChild(mkBtn('Pick', 'btn-green', () => pickRiskCard(i)));
+        cards.appendChild(div);
+    });
 }
 
 function renderStealModal(gs) {
@@ -622,17 +646,15 @@ async function executeBestDraw() {
         }
         
         if (bestCard === null) {
-            // No legal card found – ability wasted
             showToast('No legal card in top 8. Ability wasted.');
         } else {
-            // Remove card from deck at bestIndex
             gs.deck.splice(bestIndex, 1);
             gs.drawnCard = bestCard;
             gs.turnPhase = 'deciding';
             gs.turnDeadline = now() + TURN_SECONDS * 1000;
             showToast('Eagle Eye used!');
         }
-        me.roundState.bestDrawUsed = true; // ability consumed regardless
+        me.roundState.bestDrawUsed = true;
     });
 }
 
