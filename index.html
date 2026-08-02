@@ -236,6 +236,10 @@ firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const db = firebase.database();
 
+let serverTimeOffset = 0;
+db.ref('.info/serverTimeOffset').on('value', snap => serverTimeOffset = snap.val() || 0);
+function now() { return Date.now() + serverTimeOffset; }
+
 const UPGRADES = [
     { id: 'overcharge', name: 'Overcharge', cost: 3, desc: 'First 2 turns each round: treat drawn card as +20 for Keep check.' },
     { id: 'undercharge', name: 'Undercharge', cost: 3, desc: 'First 2 turns each round: treat drawn card as -20 for Keep check.' },
@@ -259,7 +263,6 @@ let myId = null, roomCode = null, roomRef = null, roomData = null;
 let timerInterval = null, shopTimerInterval = null;
 let isHost = false, shopAdvanceTriggered = false, roundEndProcessed = false, lastSabotageTurnIndex = -1, wasMyTurn = false;
 
-// ── FIXED AUDIO CONTEXT ──
 let globalAudioCtx = null;
 function playBell() {
     try {
@@ -273,7 +276,6 @@ function playBell() {
     } catch(e) {}
 }
 
-// ── ROOT TRANSACTION HELPER ──
 async function doTx(fn) {
     if (!roomRef) return;
     await roomRef.transaction(room => {
@@ -386,7 +388,7 @@ document.getElementById('btn-start').onclick = async () => {
 
     await roomRef.update({
         turnOrder: shuffledOrder, players,
-        gameState: { started: true, phase: 'playing', round: 1, totalRounds, turnOrder: shuffledOrder, deck, discards: [[], [], []], currentPlayerIndex: 0, turnPhase: 'action', drawnCard: null, turnDeadline: Date.now() + TURN_SECONDS * 1000, winner: null, shopOpen: false, shopReady: {}, roundResults: {}, totalScores: {}, riskCards: null, tempTopModifier: {}, pendingSteal: null, pendingSabotage: null, glassCards }
+        gameState: { started: true, phase: 'playing', round: 1, totalRounds, turnOrder: shuffledOrder, deck, discards: [[], [], []], currentPlayerIndex: 0, turnPhase: 'action', drawnCard: null, turnDeadline: now() + TURN_SECONDS * 1000, winner: null, shopOpen: false, shopReady: {}, roundResults: {}, totalScores: {}, riskCards: null, tempTopModifier: {}, pendingSteal: null, pendingSabotage: null, glassCards }
     });
 };
 
@@ -487,7 +489,13 @@ function renderAbilityBar(gs) {
     const bar = document.getElementById('ability-bar'); bar.innerHTML = '';
     if (!amCurrentPlayer(gs) || gs.turnPhase !== 'action' || gs.phase !== 'playing') return;
     const me = roomData.players[myId];
-    if (hasUpgrade(me, 'digit_flip') && !me.roundState?.flipUsed && (me.pile||[]).some(c => c >= 10 && c <= 99)) bar.appendChild(mkBtn('Digit Flip', 'btn-gold', () => document.getElementById('flip-modal').classList.add('visible')));
+    if (hasUpgrade(me, 'digit_flip') && !me.roundState?.flipUsed && (me.pile||[]).some(c => c >= 10 && c <= 99)) {
+        bar.appendChild(mkBtn('Digit Flip', 'btn-gold', () => {
+            const targets = document.getElementById('flip-targets'); targets.innerHTML = '';
+            (me.pile || []).forEach((card, idx) => { if (card >= 10 && card <= 99) targets.appendChild(mkBtn(`${card} → ${reverseDigits(card)}`, 'btn-secondary', () => executeFlip(idx))); });
+            document.getElementById('flip-modal').classList.add('visible');
+        }));
+    }
     if (hasUpgrade(me, 'cull_weak') && !me.roundState?.cullUsed && (me.pile||[]).length >= 4) bar.appendChild(mkBtn('Cull the Weak', 'btn-gold', () => cullWeak()));
 }
 
@@ -510,7 +518,6 @@ function renderSabotageModal(gs) {
     Object.entries(roomData.players || {}).forEach(([pid, p]) => { if (pid !== myId) targets.appendChild(mkBtn(p.name, 'btn-secondary', () => executeSabotage(pid))); });
 }
 
-// ── INLINE TURN LOGIC ──
 function endTurnLogic(room, pid) {
     const gs = room.gameState, p = room.players[pid], top = p.pile?.length ? p.pile[p.pile.length - 1] : 0, deckEmpty = !(gs.deck?.length);
     if (hasUpgrade(p, 'thief_reflex') && !p.roundState?.stealUsed && top >= 80 && !deckEmpty && Object.entries(room.players).some(([id, op]) => id !== pid && op.pile?.length)) return gs.pendingSteal = pid;
@@ -520,7 +527,7 @@ function advanceTurnLogic(room, roundEnding) {
     const gs = room.gameState; if (gs.tempTopModifier) gs.tempTopModifier[gs.turnOrder[gs.currentPlayerIndex]] = null;
     if (roundEnding || gs.phase === 'roundEnd') { processRoundEndLogic(room); } 
     else {
-        gs.currentPlayerIndex = (gs.currentPlayerIndex + 1) % gs.turnOrder.length; gs.turnPhase = 'action'; gs.drawnCard = null; gs.riskCards = null; gs.turnDeadline = Date.now() + TURN_SECONDS * 1000;
+        gs.currentPlayerIndex = (gs.currentPlayerIndex + 1) % gs.turnOrder.length; gs.turnPhase = 'action'; gs.drawnCard = null; gs.riskCards = null; gs.turnDeadline = now() + TURN_SECONDS * 1000;
         const nextPid = gs.turnOrder[gs.currentPlayerIndex], p = room.players[nextPid];
         if (p?.pile?.length && gs.glassCards?.length) p.pile = p.pile.filter(c => gs.glassCards.includes(c) ? Math.random() >= (1/6) : true);
     }
@@ -536,18 +543,17 @@ function processRoundEndLogic(room) {
     gs.phase = 'roundEnd'; gs.turnPhase = 'action'; gs.drawnCard = null;
 }
 
-// ── TRANSACTED GAME ACTIONS ──
 async function drawCard() {
     await doTx((room, gs, me) => {
         if (gs.phase !== 'playing' || gs.turnPhase !== 'action' || gs.turnOrder[gs.currentPlayerIndex] !== myId || !gs.deck?.length) return false;
-        if (hasUpgrade(me, 'rocky') && Math.floor(Math.random() * 15) === 0) { gs.drawnCard = 0; gs.turnPhase = 'deciding'; gs.turnDeadline = Date.now() + TURN_SECONDS * 1000; return; }
+        if (hasUpgrade(me, 'rocky') && Math.floor(Math.random() * 15) === 0) { gs.drawnCard = 0; gs.turnPhase = 'deciding'; gs.turnDeadline = now() + TURN_SECONDS * 1000; return; }
         const card = gs.deck.pop();
         if (hasUpgrade(me, 'risk_it') && !me.roundState?.riskItUsed && Math.floor(Math.random() * 7) + 1 === 1) {
             const discards = normalizeDiscards(gs.discards), emptyIdx = discards.findIndex(p => p.length === 0); discards[emptyIdx !== -1 ? emptyIdx : 0].push(card); gs.discards = discards;
             if (gs.deck.length < 2) { gs.drawnCard = gs.deck.pop() || null; gs.turnPhase = 'deciding'; } else { gs.riskCards = [gs.deck.pop(), gs.deck.pop()]; gs.turnPhase = 'risking'; gs.drawnCard = null; }
-            me.roundState.riskItUsed = true; gs.turnDeadline = Date.now() + TURN_SECONDS * 1000; return;
+            me.roundState.riskItUsed = true; gs.turnDeadline = now() + TURN_SECONDS * 1000; return;
         }
-        gs.drawnCard = card; gs.turnPhase = 'deciding'; gs.turnDeadline = Date.now() + TURN_SECONDS * 1000;
+        gs.drawnCard = card; gs.turnPhase = 'deciding'; gs.turnDeadline = now() + TURN_SECONDS * 1000;
     });
 }
 
@@ -588,7 +594,7 @@ async function rerollCard() {
     await doTx((room, gs, me) => {
         if (gs.turnPhase !== 'deciding' || gs.turnOrder[gs.currentPlayerIndex] !== myId || !gs.deck?.length) return false;
         const discards = normalizeDiscards(gs.discards), emptyIdx = discards.findIndex(p => p.length === 0); discards[emptyIdx !== -1 ? emptyIdx : 0].push(gs.drawnCard); gs.discards = discards;
-        gs.drawnCard = gs.deck.pop(); gs.turnDeadline = Date.now() + TURN_SECONDS * 1000;
+        gs.drawnCard = gs.deck.pop(); gs.turnDeadline = now() + TURN_SECONDS * 1000;
         if (needsCoin) me.coins--; else me.roundState.freeRerollUsed = true;
     });
 }
@@ -654,7 +660,7 @@ function renderRoundOverlay() {
 async function openShopHost() {
     shopAdvanceTriggered = false; roundEndProcessed = false; const offerings = {};
     Object.entries(roomData.players || {}).forEach(([pid, p]) => { offerings[pid] = shuffle(UPGRADES.filter(u => !(p.upgrades || []).includes(u.id))).slice(0, 3).map(u => u.id); });
-    await roomRef.child('gameState').update({ phase: 'shop', shopOpen: true, shopDeadline: Date.now() + SHOP_SECONDS * 1000, shopReady: {}, shopOfferings: offerings });
+    await roomRef.child('gameState').update({ phase: 'shop', shopOpen: true, shopDeadline: now() + SHOP_SECONDS * 1000, shopReady: {}, shopOfferings: offerings });
 }
 
 function renderFinale() {
@@ -690,24 +696,44 @@ async function startNextRound() {
     const playerIds = Object.keys(roomData.players), shuffledOrder = shuffle(playerIds); let deck = buildDeck(deckSizeForPlayers(playerIds.length)); const players = { ...roomData.players };
     for (const pid of playerIds) { players[pid] = { ...players[pid], pile: [], roundState: defaultRoundState() }; if (hasUpgrade(players[pid], 'small_start')) { const low = deck.filter(c => c < 40); if (low.length) { const pick = low[Math.floor(Math.random() * low.length)]; deck = deck.filter(c => c !== pick); players[pid].pile = [pick]; } } }
     let glassCount = Object.values(players).reduce((acc, p) => acc + (hasUpgrade(p, 'glass') ? 5 : 0), 0); const glassCards = glassCount > 0 ? shuffle([...deck]).slice(0, glassCount) : [];
-    await roomRef.update({ turnOrder: shuffledOrder, players, gameState: { ...gs, phase: 'playing', round: gs.round + 1, turnOrder: shuffledOrder, deck, discards: [[], [], []], currentPlayerIndex: 0, turnPhase: 'action', drawnCard: null, turnDeadline: Date.now() + TURN_SECONDS * 1000, shopOpen: false, shopReady: {}, roundResults: {}, riskCards: null, tempTopModifier: {}, pendingSteal: null, pendingSabotage: null, shopOfferings: null, glassCards } });
+    await roomRef.update({ turnOrder: shuffledOrder, players, gameState: { ...gs, phase: 'playing', round: gs.round + 1, turnOrder: shuffledOrder, deck, discards: [[], [], []], currentPlayerIndex: 0, turnPhase: 'action', drawnCard: null, turnDeadline: now() + TURN_SECONDS * 1000, shopOpen: false, shopReady: {}, roundResults: {}, riskCards: null, tempTopModifier: {}, pendingSteal: null, pendingSabotage: null, shopOfferings: null, glassCards } });
 }
 
-function updateTimerDisplay(deadline) { clearInterval(timerInterval); const el = document.getElementById('timer'); function tick() { if (!deadline) return el.textContent = '--'; const r = Math.max(0, Math.ceil((deadline - Date.now()) / 1000)); el.textContent = r; el.classList.toggle('urgent', r <= 5); } tick(); timerInterval = setInterval(tick, 250); }
-function updateShopTimerDisplay(deadline) { clearInterval(shopTimerInterval); const el = document.getElementById('shop-timer'); function tick() { if (!deadline) return el.textContent = '--'; el.textContent = Math.max(0, Math.ceil((deadline - Date.now()) / 1000)); } tick(); shopTimerInterval = setInterval(tick, 250); }
+function updateTimerDisplay(deadline) { 
+    clearInterval(timerInterval); const el = document.getElementById('timer'); 
+    function tick() { 
+        if (!deadline) return el.textContent = '--'; 
+        const r = Math.max(0, Math.ceil((deadline - now()) / 1000)); 
+        el.textContent = r; el.classList.toggle('urgent', r <= 5); 
+        if (r <= 0 && roomData?.gameState) checkTurnTimeout(roomData.gameState);
+    } 
+    tick(); timerInterval = setInterval(tick, 250); 
+}
+function updateShopTimerDisplay(deadline) { 
+    clearInterval(shopTimerInterval); const el = document.getElementById('shop-timer'); 
+    function tick() { 
+        if (!deadline) return el.textContent = '--'; 
+        const r = Math.max(0, Math.ceil((deadline - now()) / 1000)); 
+        el.textContent = r; 
+        if (r <= 0 && roomData?.gameState) checkShopTimeout(roomData.gameState);
+    } 
+    tick(); shopTimerInterval = setInterval(tick, 250); 
+}
+
 async function checkTurnTimeout(gs) {
-    if (gs.phase !== 'playing' || !gs.turnDeadline || Date.now() < gs.turnDeadline || getCurrentPlayerId(gs) !== myId) return;
+    if (gs.phase !== 'playing' || !gs.turnDeadline || now() < gs.turnDeadline || getCurrentPlayerId(gs) !== myId) return;
     if (gs.turnPhase === 'deciding' && gs.drawnCard !== null) { const discards = normalizeDiscards(gs.discards), emptyIdx = discards.findIndex(p => p.length === 0); await discardCard(emptyIdx !== -1 ? emptyIdx : 0); }
     else if (gs.turnPhase === 'risking') await pickRiskCard((gs.riskCards || [0, 0])[0] >= (gs.riskCards || [0, 0])[1] ? 0 : 1); else if (gs.turnPhase === 'action') await doTx((r,g,m) => endTurnLogic(r, myId));
 }
-async function checkShopTimeout(gs) { if (gs.phase === 'shop' && gs.shopDeadline && Date.now() >= gs.shopDeadline) { const updates = {}; Object.keys(roomData.players || {}).forEach(pid => updates[`gameState/shopReady/${pid}`] = true); await roomRef.update(updates); if (isHost) setTimeout(() => startNextRound(), 500); } }
+async function checkShopTimeout(gs) { 
+    if (gs.phase === 'shop' && gs.shopDeadline && now() >= gs.shopDeadline) { 
+        const updates = {}; Object.keys(roomData.players || {}).forEach(pid => updates[`gameState/shopReady/${pid}`] = true); await roomRef.update(updates); 
+        if (isHost) setTimeout(() => startNextRound(), 500); 
+    } 
+}
 
 document.getElementById('btn-tutorial').onclick = () => document.getElementById('tutorial-modal').style.display = 'block'; document.getElementById('btn-close-tutorial').onclick = () => document.getElementById('tutorial-modal').style.display = 'none';
 document.getElementById('btn-skip-steal').onclick = () => skipSteal(); document.getElementById('btn-skip-sabotage').onclick = () => skipSabotage(); document.getElementById('btn-cancel-flip').onclick = () => document.getElementById('flip-modal').classList.remove('visible');
-document.getElementById('flip-targets').addEventListener('DOMNodeInserted', () => {
-    const me = roomData.players[myId], targets = document.getElementById('flip-targets'); targets.innerHTML = '';
-    (me.pile || []).forEach((card, idx) => { if (card >= 10 && card <= 99) targets.appendChild(mkBtn(`${card} → ${reverseDigits(card)}`, 'btn-secondary', () => executeFlip(idx))); });
-});
 </script>
 </body>
 </html>
