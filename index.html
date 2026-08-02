@@ -240,6 +240,8 @@ let serverTimeOffset = 0;
 db.ref('.info/serverTimeOffset').on('value', snap => serverTimeOffset = snap.val() || 0);
 function now() { return Date.now() + serverTimeOffset; }
 
+const getSuit = (v) => ['Spades', 'Diamonds', 'Clubs', 'Hearts'][v % 4];
+
 const UPGRADES = [
     { id: 'overcharge', name: 'Overcharge', cost: 3, desc: 'First 2 turns each round: treat drawn card as +20 for Keep check.' },
     { id: 'undercharge', name: 'Undercharge', cost: 3, desc: 'First 2 turns each round: treat drawn card as -20 for Keep check.' },
@@ -254,6 +256,12 @@ const UPGRADES = [
     { id: 'mystery_box', name: 'Mystery Box', cost: 2, desc: 'Does absolutely nothing. Mystery!' },
     { id: 'thief_reflex', name: "Thief's Reflex", cost: 5, desc: 'Once per round: if top ≥ 80, steal an opponent\'s top card after your turn.' },
     { id: 'sabotage', name: 'Sabotage', cost: 4, desc: 'Once per round: +15 effective top on an opponent until their turn ends.' },
+    { id: 'burn_hearts', name: 'Burn Hearts', cost: 5, desc: 'One-time use. Destroy ALL ♥ cards from every player\'s pile (including yours).' },
+    { id: 'burn_diamonds', name: 'Burn Diamonds', cost: 5, desc: 'One-time use. Destroy ALL ♦ cards from every player\'s pile (including yours).' },
+    { id: 'burn_clubs', name: 'Burn Clubs', cost: 5, desc: 'One-time use. Destroy ALL ♣ cards from every player\'s pile (including yours).' },
+    { id: 'burn_spades', name: 'Burn Spades', cost: 5, desc: 'One-time use. Destroy ALL ♠ cards from every player\'s pile (including yours).' },
+    { id: 'heartless', name: 'Heartless', cost: 3, desc: 'Passive. If your final pile contains no ♥ cards at round end, earn +2 coins.' },
+    { id: 'best_draw', name: 'Eagle Eye', cost: 5, desc: 'Once per round: peek at top 8 deck cards, draw the best legal one (must keep). If none legal, ability wasted.' },
 ];
 
 const TURN_SECONDS = 30;
@@ -299,7 +307,7 @@ function showToast(msg) { const t = document.getElementById('toast'); t.textCont
 function showScreen(id) { document.querySelectorAll('.screen').forEach(s => s.classList.remove('active')); document.getElementById(id).classList.add('active'); }
 function copyRoomCode(code) { navigator.clipboard.writeText(code).then(() => showToast('Room code copied!')); }
 function hasUpgrade(player, id) { return (player?.upgrades || []).includes(id); }
-function defaultRoundState() { return { overchargeTurnsUsed: 0, underchargeTurnsUsed: 0, freeRerollUsed: false, riskItUsed: false, destroyUsed: false, flipUsed: false, cullUsed: false, stealUsed: false, sabotageUsed: false }; }
+function defaultRoundState() { return { overchargeTurnsUsed: 0, underchargeTurnsUsed: 0, freeRerollUsed: false, riskItUsed: false, destroyUsed: false, flipUsed: false, cullUsed: false, stealUsed: false, sabotageUsed: false, bestDrawUsed: false }; }
 function getEffectiveTop(playerId, gs, room) {
     const p = room.players[playerId];
     if (!p || !p.pile || p.pile.length === 0) return 0;
@@ -497,6 +505,20 @@ function renderAbilityBar(gs) {
         }));
     }
     if (hasUpgrade(me, 'cull_weak') && !me.roundState?.cullUsed && (me.pile||[]).length >= 4) bar.appendChild(mkBtn('Cull the Weak', 'btn-gold', () => cullWeak()));
+    
+    // Burn suit buttons (one-time use)
+    ['burn_hearts','burn_diamonds','burn_clubs','burn_spades'].forEach(burnId => {
+        if (hasUpgrade(me, burnId) && !me[burnId + '_used']) {
+            const suit = burnId.split('_')[1];
+            const suitSymbol = {hearts:'♥', diamonds:'♦', clubs:'♣', spades:'♠'}[suit];
+            bar.appendChild(mkBtn(`Burn ${suitSymbol}`, 'btn-gold', () => executeBurn(suit, burnId)));
+        }
+    });
+
+    // Eagle Eye (best draw) – updated behaviour
+    if (hasUpgrade(me, 'best_draw') && !me.roundState?.bestDrawUsed) {
+        bar.appendChild(mkBtn('Eagle Eye', 'btn-gold', () => executeBestDraw()));
+    }
 }
 
 function renderRiskZone(gs) {
@@ -538,6 +560,15 @@ function processRoundEndLogic(room) {
     if (winners.length > 1) { let minTop = Infinity, tie = []; winners.forEach(pid => { if (tops[pid] < minTop) { minTop = tops[pid]; tie = [pid]; } else if (tops[pid] === minTop) tie.push(pid); }); winners = tie; }
     let minT = Infinity, lowBonus = []; Object.entries(tops).forEach(([pid, top]) => { if (top < minT) { minT = top; lowBonus = [pid]; } else if (top === minT) lowBonus.push(pid); });
     Object.keys(players).forEach(pid => { const p = players[pid]; p.roundScores = [...(p.roundScores || []), (p.pile || []).length]; p.coins = (p.coins || 0) + 3 + (lowBonus.includes(pid) ? 1 : 0); p.roundState = defaultRoundState(); });
+    // Heartless passive
+    Object.keys(players).forEach(pid => {
+        const p = players[pid];
+        if (hasUpgrade(p, 'heartless')) {
+            if (!p.pile.some(c => getSuit(c) === 'Hearts')) {
+                p.coins += 2;
+            }
+        }
+    });
     gs.roundResults = { round: gs.round, piles, winners, lowTopBonus: lowBonus }; gs.totalScores = gs.totalScores || {};
     Object.keys(players).forEach(pid => gs.totalScores[pid] = (gs.totalScores[pid] || 0) + (players[pid].pile || []).length);
     gs.phase = 'roundEnd'; gs.turnPhase = 'action'; gs.drawnCard = null;
@@ -554,6 +585,54 @@ async function drawCard() {
             me.roundState.riskItUsed = true; gs.turnDeadline = now() + TURN_SECONDS * 1000; return;
         }
         gs.drawnCard = card; gs.turnPhase = 'deciding'; gs.turnDeadline = now() + TURN_SECONDS * 1000;
+    });
+}
+
+async function executeBurn(suit, upgradeId) {
+    await doTx((room, gs, me) => {
+        if (me[upgradeId + '_used']) return false;
+        Object.values(room.players).forEach(p => {
+            if (p.pile && p.pile.length) {
+                p.pile = p.pile.filter(c => getSuit(c).toLowerCase() !== suit);
+            }
+        });
+        me[upgradeId + '_used'] = true;
+        showToast(`All ${suit} cards burned!`);
+    });
+}
+
+async function executeBestDraw() {
+    await doTx((room, gs, me) => {
+        if (gs.phase !== 'playing' || gs.turnPhase !== 'action' || gs.turnOrder[gs.currentPlayerIndex] !== myId || !gs.deck?.length) return false;
+        if (me.roundState?.bestDrawUsed) return false;
+        
+        const effectiveTop = getEffectiveTop(myId, gs, room);
+        const peekCount = Math.min(8, gs.deck.length);
+        const peekCards = gs.deck.slice(0, peekCount);
+        
+        let bestCard = null, bestIndex = -1;
+        for (let i = 0; i < peekCards.length; i++) {
+            const card = peekCards[i];
+            if (card > effectiveTop || card === 0) {
+                if (bestCard === null || card > bestCard) {
+                    bestCard = card;
+                    bestIndex = i;
+                }
+            }
+        }
+        
+        if (bestCard === null) {
+            // No legal card found – ability wasted
+            showToast('No legal card in top 8. Ability wasted.');
+        } else {
+            // Remove card from deck at bestIndex
+            gs.deck.splice(bestIndex, 1);
+            gs.drawnCard = bestCard;
+            gs.turnPhase = 'deciding';
+            gs.turnDeadline = now() + TURN_SECONDS * 1000;
+            showToast('Eagle Eye used!');
+        }
+        me.roundState.bestDrawUsed = true; // ability consumed regardless
     });
 }
 
