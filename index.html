@@ -554,6 +554,13 @@
         .toast.show {
             opacity: 1;
         }
+        #auth-loading {
+            display: none;
+            text-align: center;
+            color: var(--muted);
+            margin-top: 1rem;
+            font-size: 0.9rem;
+        }
     </style>
 </head>
 <body>
@@ -563,11 +570,12 @@
         <div class="subtitle">Gauntlet Edition</div>
         <div class="panel">
             <input type="text" id="player-name" placeholder="Your name" maxlength="16">
-            <button class="btn" id="btn-create">Create Room</button>
+            <button class="btn" id="btn-create" disabled>Create Room</button>
+            <div id="auth-loading">Connecting to server…</div>
             <div class="divider">— or —</div>
             <input type="text" id="room-code-input" placeholder="Room code (4 letters)" maxlength="4"
             style="text-transform:uppercase">
-            <button class="btn btn-secondary" id="btn-join">Join Room</button>
+            <button class="btn btn-secondary" id="btn-join" disabled>Join Room</button>
         </div>
         <button class="btn btn-secondary" style="max-width:440px; width:90vw;"
         onclick="alert('Loop: Draw cards, keep if higher than your top card, or discard. Objective: Have the largest pile.')">Rules</button>
@@ -609,8 +617,7 @@
                     <div id="deck-count-label" style="font-size:1.2rem; font-weight:700; color:var(--gold);">x0</div>
                 </div>
                 <button class="btn btn-sm" id="btn-draw">Draw</button>
-                <button class="btn btn-sm btn-secondary" id="btn-tutorial" style="margin-top:0.5rem;">📖 How to
-                Play</button>
+                <button class="btn btn-sm btn-secondary" id="btn-tutorial" style="margin-top:0.5rem;">📖 How to Play</button>
             </div>
             <div class="discard-row" id="discard-row"></div>
         </div>
@@ -774,6 +781,7 @@
                 roundEndProcessed = false,
                 lastSabotageTurnIndex = -1,
                 wasMyTurn = false;
+            let authReady = false;
 
             let globalAudioCtx = null;
 
@@ -793,13 +801,38 @@
                 } catch (e) {}
             }
 
-            // FIXED: doTx now returns a boolean indicating whether the transaction committed
+            function enableLobbyButtons(enable) {
+                document.getElementById('btn-create').disabled = !enable;
+                document.getElementById('btn-join').disabled = !enable;
+                document.getElementById('auth-loading').style.display = enable ? 'none' : 'block';
+            }
+
+            // Firebase Auth with loading state
+            enableLobbyButtons(false);
+            auth.signInAnonymous()
+                .catch(err => {
+                    console.error('Auth failed:', err);
+                    showToast('Failed to connect. Refresh the page.');
+                    enableLobbyButtons(false);
+                });
+            auth.onAuthStateChanged(user => {
+                if (user) {
+                    myId = user.uid;
+                    authReady = true;
+                    enableLobbyButtons(true);
+                } else {
+                    myId = null;
+                    authReady = false;
+                    enableLobbyButtons(false);
+                }
+            });
+
             async function doTx(fn) {
                 if (!roomRef) return false;
                 const result = await roomRef.transaction(room => {
                     if (!room || !room.gameState || !room.players) return room;
                     const res = fn(room, room.gameState, room.players[myId]);
-                    if (res === false) return; // abort transaction
+                    if (res === false) return;
                     return room;
                 });
                 return result.committed;
@@ -876,40 +909,48 @@
 
             function amCurrentPlayer(gs) { return getCurrentPlayerId(gs) === myId; }
 
-            auth.signInAnonymous().catch(err => { console.error('Auth failed:', err);
-                showToast('Failed to connect. Refresh the page.'); });
-            auth.onAuthStateChanged(user => { if (user) myId = user.uid; });
-
             document.getElementById('btn-create').onclick = async () => {
+                if (!authReady || !myId) return showToast('Still connecting…');
                 const name = document.getElementById('player-name').value.trim();
-                if (!name || !myId) return showToast(name ? 'Connecting…' : 'Enter your name');
+                if (!name) return showToast('Enter your name');
                 roomCode = generateRoomCode();
                 roomRef = db.ref('rooms/' + roomCode);
-                if ((await roomRef.once('value')).exists()) return showToast('Code collision, try again');
-                await roomRef.set({
-                    creator: myId,
-                    turnOrder: [myId],
-                    players: { [myId]: { name, pile: [], coins: 0, upgrades: [], roundScores: [],
-                            roundState: defaultRoundState() } },
-                    gameState: { started: false, phase: 'lobby' }
-                });
-                enterWaitingRoom();
+                try {
+                    if ((await roomRef.once('value')).exists()) return showToast('Code collision, try again');
+                    await roomRef.set({
+                        creator: myId,
+                        turnOrder: [myId],
+                        players: { [myId]: { name, pile: [], coins: 0, upgrades: [], roundScores: [],
+                                roundState: defaultRoundState() } },
+                        gameState: { started: false, phase: 'lobby' }
+                    });
+                    enterWaitingRoom();
+                } catch (e) {
+                    console.error(e);
+                    showToast('Error creating room. Check console.');
+                }
             };
 
             document.getElementById('btn-join').onclick = async () => {
+                if (!authReady || !myId) return showToast('Still connecting…');
                 const name = document.getElementById('player-name').value.trim(),
                     code = document.getElementById('room-code-input').value.trim().toUpperCase();
-                if (!name || code.length !== 4 || !myId) return showToast('Check inputs/connection');
+                if (!name || code.length !== 4) return showToast('Check inputs');
                 roomCode = code;
                 roomRef = db.ref('rooms/' + roomCode);
-                const snap = await roomRef.once('value');
-                if (!snap.exists()) return showToast('Room not found');
-                if (snap.val().gameState?.started) return showToast('Game already started');
-                await roomRef.child('players/' + myId).set({ name, pile: [], coins: 0, upgrades: [],
-                    roundScores: [], roundState: defaultRoundState() });
-                await roomRef.child('turnOrder').transaction(order => { if (!order) order = []; if (!order
-                        .includes(myId)) order.push(myId); return order; });
-                enterWaitingRoom();
+                try {
+                    const snap = await roomRef.once('value');
+                    if (!snap.exists()) return showToast('Room not found');
+                    if (snap.val().gameState?.started) return showToast('Game already started');
+                    await roomRef.child('players/' + myId).set({ name, pile: [], coins: 0, upgrades: [],
+                        roundScores: [], roundState: defaultRoundState() });
+                    await roomRef.child('turnOrder').transaction(order => { if (!order) order = []; if (!order
+                            .includes(myId)) order.push(myId); return order; });
+                    enterWaitingRoom();
+                } catch (e) {
+                    console.error(e);
+                    showToast('Error joining room.');
+                }
             };
 
             function enterWaitingRoom() {
@@ -925,8 +966,7 @@
             async function leaveRoom() {
                 clearInterval(timerInterval);
                 clearInterval(shopTimerInterval);
-                timerInterval = null;
-                shopTimerInterval = null;
+                timerInterval = shopTimerInterval = null;
                 if (roomRef && myId) {
                     await roomRef.child('players/' + myId).remove();
                     await roomRef.child('turnOrder').transaction(order => order ? order.filter(id => id !== myId) :
@@ -1202,7 +1242,6 @@
                 }
             }
 
-            // FIXED: Added guard against duplicate round-end processing
             function processRoundEndLogic(room) {
                 const gs = room.gameState;
                 if (gs._roundEndProcessed) return;
@@ -1252,7 +1291,6 @@
                             emptyIdx = discards.findIndex(p => p.length === 0);
                         discards[emptyIdx !== -1 ? emptyIdx : 0].push(card);
                         gs.discards = discards;
-                        // FIXED: Handle empty deck during Risk It fallback
                         if (gs.deck.length < 2) {
                             gs.drawnCard = gs.deck.pop() || null;
                             if (gs.drawnCard === null) {
@@ -1276,7 +1314,6 @@
                 });
             }
 
-            // FIXED: pickRiskCard now pushes chosen card instead of replacing top
             async function pickRiskCard(index) {
                 await doTx((room, gs, me) => {
                     if (gs.turnPhase !== 'risking' || gs.turnOrder[gs.currentPlayerIndex] !== myId || !gs
@@ -1288,7 +1325,7 @@
                     discards[emptyIdx !== -1 ? emptyIdx : 0].push(unchosen);
                     gs.discards = discards;
                     me.pile = me.pile || [];
-                    me.pile.push(chosen); // FIXED: push instead of replacing top
+                    me.pile.push(chosen);
                     gs.riskCards = null;
                     gs.turnPhase = 'action';
                     endTurnLogic(room, myId);
@@ -1338,7 +1375,6 @@
                     me.roundState.destroyUsed = true;
                     endTurnLogic(room, myId); }); }
 
-            // FIXED: Added coin re-check inside transaction to prevent negative coins
             async function rerollCard() {
                 const rs = roomData.players[myId].roundState || {},
                     needsCoin = rs.freeRerollUsed;
@@ -1346,7 +1382,7 @@
                 await doTx((room, gs, me) => {
                     if (gs.turnPhase !== 'deciding' || gs.turnOrder[gs.currentPlayerIndex] !== myId || !gs.deck
                         ?.length) return false;
-                    if (needsCoin && (me.coins || 0) < 1) return false; // FIXED: Re-check inside transaction
+                    if (needsCoin && (me.coins || 0) < 1) return false;
                     const discards = normalizeDiscards(gs.discards),
                         emptyIdx = discards.findIndex(p => p.length === 0);
                     discards[emptyIdx !== -1 ? emptyIdx : 0].push(gs.drawnCard);
@@ -1384,13 +1420,12 @@
                 showToast('Cull the Weak activated!');
             }
 
-            // FIXED: Digit Flip now flips the card in place instead of overwriting the top
             async function executeFlip(cardIdx) {
                 document.getElementById('flip-modal').classList.remove('visible');
                 await doTx((room, gs, me) => {
                     if (me.roundState?.flipUsed || cardIdx >= (me.pile || []).length || me.pile[cardIdx] < 10 || me
                         .pile[cardIdx] > 99) return false;
-                    me.pile[cardIdx] = reverseDigits(me.pile[cardIdx]); // FIXED: flip in place
+                    me.pile[cardIdx] = reverseDigits(me.pile[cardIdx]);
                     me.roundState.flipUsed = true;
                 });
             }
@@ -1400,7 +1435,6 @@
                     gs.pendingSteal = null;
                     advanceTurnLogic(room, false); }); }
 
-            // FIXED: executeSteal now pushes stolen card instead of replacing top
             async function executeSteal(targetId) {
                 document.getElementById('steal-modal').classList.remove('visible');
                 await doTx((room, gs, me) => {
@@ -1408,7 +1442,7 @@
                     if (!t?.pile?.length) return false;
                     const stolen = t.pile.pop();
                     me.pile = me.pile || [];
-                    me.pile.push(stolen); // FIXED: push instead of replacing top
+                    me.pile.push(stolen);
                     me.roundState.stealUsed = true;
                     gs.pendingSteal = null;
                     advanceTurnLogic(room, false);
@@ -1514,7 +1548,6 @@
             document.getElementById('btn-shop-ready').onclick = async () => await roomRef.child('gameState/shopReady/' +
                 myId).set(true);
 
-            // FIXED: Only shows toast and sets ready on successful purchase
             async function buyUpgrade(id, cost) {
                 const success = await doTx((room, gs, me) => {
                     if ((me.upgrades || []).includes(id) || (me.coins || 0) < cost) return false;
@@ -1530,7 +1563,6 @@
                 }
             }
 
-            // FIXED: startNextRound now fetches a fresh snapshot to avoid stale data
             async function startNextRound() {
                 if (!isHost) return;
                 const snap = await roomRef.child('gameState').once('value');
