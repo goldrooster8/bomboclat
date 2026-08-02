@@ -429,15 +429,16 @@ let roomData = null;
 let timerInterval = null;
 let shopTimerInterval = null;
 let isHost = false;
-let shopAdvanceTriggered = false;
-let roundEndProcessed = false;
-let lastSabotageTurnIndex = -1;
-let wasMyTurn = false;
+let globalAudioCtx = null;
 
 // ── Audio Bell ──
 function playBell() {
     try {
-        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        if (!globalAudioCtx) {
+            globalAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            if (globalAudioCtx.state === 'suspended') globalAudioCtx.resume();
+        }
+        const ctx = globalAudioCtx;
         const osc = ctx.createOscillator(), g = ctx.createGain();
         osc.type = 'sine';
         osc.frequency.value = 880;
@@ -448,118 +449,63 @@ function playBell() {
     } catch(e) {}
 }
 
-// ── Card color helper ──
+// ── Helpers ──
 function cardColor(value) {
-    const colors = ['#2196f3', '#4caf50', '#ffeb3b', '#ff9800', '#f44336', '#e91e63'];
+    const colors = ['#2196f3','#4caf50','#ffeb3b','#ff9800','#f44336','#e91e63'];
     return colors[Math.max(0, Math.min(5, Math.floor(value / 17)))];
 }
-
-// ── Utility functions ──
 function normalizeDiscards(discards) {
-    if (!Array.isArray(discards)) return [[], [], []];
-    return [0, 1, 2].map(i => Array.isArray(discards[i]) ? discards[i] : []);
+    if (!Array.isArray(discards)) return [[],[],[]];
+    return [0,1,2].map(i => Array.isArray(discards[i]) ? discards[i] : []);
 }
-function shuffle(arr) {
-    const a = [...arr];
-    for (let i = a.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [a[i], a[j]] = [a[j], a[i]];
-    }
-    return a;
-}
-function generateRoomCode() {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
-    let code = '';
-    for (let i = 0; i < 4; i++) code += chars[Math.floor(Math.random() * chars.length)];
-    return code;
-}
-function deckSizeForPlayers(n) {
-    if (n <= 2) return 16; if (n === 3) return 28; if (n === 4) return 40; return 50;
-}
-function buildDeck(size) {
-    const all = shuffle(Array.from({ length: 100 }, (_, i) => i + 1));
-    return all.slice(0, size);
-}
-function showToast(msg) {
-    const t = document.getElementById('toast');
-    t.textContent = msg; t.classList.add('show');
-    setTimeout(() => t.classList.remove('show'), 2500);
-}
-function showScreen(id) {
-    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-    document.getElementById(id).classList.add('active');
-}
-function copyRoomCode(code) {
-    navigator.clipboard.writeText(code).then(() => showToast('Room code copied!'));
-}
-function hasUpgrade(player, id) { return (player?.upgrades || []).includes(id); }
-function defaultRoundState() {
-    return {
-        overchargeTurnsUsed: 0,
-        underchargeTurnsUsed: 0,
-        freeRerollUsed: false,
-        riskItUsed: false,
-        destroyUsed: false,
-        flipUsed: false,
-        cullUsed: false,
-        stealUsed: false,
-        sabotageUsed: false,
-    };
-}
-function getEffectiveTop(playerId, gs) {
-    const player = roomData?.players?.[playerId];
-    if (!player || !player.pile || player.pile.length === 0) return 0;
-    let top = player.pile[player.pile.length - 1];
-    if (gs?.tempTopModifier && gs.tempTopModifier[playerId]) top += gs.tempTopModifier[playerId];
+function shuffle(arr) { const a=[...arr]; for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];} return a; }
+function generateRoomCode() { const chars='ABCDEFGHJKLMNPQRSTUVWXYZ'; let code=''; for(let i=0;i<4;i++) code+=chars[Math.floor(Math.random()*chars.length)]; return code; }
+function deckSizeForPlayers(n) { if(n<=2)return 16; if(n===3)return 28; if(n===4)return 40; return 50; }
+function buildDeck(size) { const all=shuffle(Array.from({length:100},(_,i)=>i+1)); return all.slice(0,size); }
+function showToast(msg) { const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2500); }
+function showScreen(id) { document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active')); document.getElementById(id).classList.add('active'); }
+function copyRoomCode(code) { navigator.clipboard.writeText(code).then(()=>showToast('Room code copied!')); }
+function hasUpgrade(player,id) { return (player?.upgrades||[]).includes(id); }
+function defaultRoundState() { return { overchargeTurnsUsed:0, underchargeTurnsUsed:0, freeRerollUsed:false, riskItUsed:false, destroyUsed:false, flipUsed:false, cullUsed:false, stealUsed:false, sabotageUsed:false }; }
+function getEffectiveTop(playerId, gs, players) {
+    const p = players?.[playerId];
+    if (!p || !p.pile || p.pile.length===0) return 0;
+    let top = p.pile[p.pile.length-1];
+    if (gs?.tempTopModifier?.[playerId]) top += gs.tempTopModifier[playerId];
     return top;
 }
-function canKeep(playerId, drawnCard, gs) {
-    if (drawnCard === 0) return true; // Rock
-    const player = roomData?.players?.[playerId];
-    if (!player) return false;
-    const pile = player.pile || [];
-    if (pile.length === 0) return true;
-    return drawnCard > getEffectiveTop(playerId, gs);
+function getCurrentPlayerId(gs) { const order=gs?.turnOrder||[]; return order[gs.currentPlayerIndex]||null; }
+function amCurrentPlayer(gs) { return getCurrentPlayerId(gs)===myId; }
+function reverseDigits(n) { if(n<10||n>99)return n; return parseInt(String(n).split('').reverse().join(''),10); }
+
+// ── Atomic root transaction helpers ──
+function runTransaction(updateFn) {
+    return roomRef.transaction(roomData => {
+        if (!roomData) return;
+        return updateFn(roomData);
+    });
 }
-function canTakeFromDiscard(playerId, card, gs) {
-    if (card === 0) return true; // Rock
-    const player = roomData?.players?.[playerId];
-    if (!player) return false;
-    const pile = player.pile || [];
-    if (pile.length === 0) return true;
-    return card > getEffectiveTop(playerId, gs);
-}
-function reverseDigits(n) {
-    if (n < 10 || n > 99) return n;
-    return parseInt(String(n).split('').reverse().join(''), 10);
-}
-function getCurrentPlayerId(gs) {
-    if (!gs) return null;
-    const order = gs.turnOrder || roomData?.turnOrder || [];
-    return order[gs.currentPlayerIndex || 0];
-}
-function amCurrentPlayer(gs) { return getCurrentPlayerId(gs) === myId; }
 
 // ── Auth ──
-auth.signInAnonymously().catch(err => { console.error('Auth failed:', err); showToast('Failed to connect. Refresh the page.'); });
+auth.signInAnonymously().catch(err => { console.error('Auth failed:',err); showToast('Failed to connect.'); });
 auth.onAuthStateChanged(user => { if (user) myId = user.uid; });
 
 // ── UI Event Handlers ──
 document.getElementById('btn-create').onclick = async () => {
     const name = document.getElementById('player-name').value.trim();
     if (!name) return showToast('Enter your name');
-    if (!myId) return showToast('Connecting… try again');
+    if (!myId) return showToast('Connecting…');
     roomCode = generateRoomCode();
-    roomRef = db.ref('rooms/' + roomCode);
+    roomRef = db.ref('rooms/'+roomCode);
     const snap = await roomRef.once('value');
     if (snap.exists()) return showToast('Code collision, try again');
     await roomRef.set({
         creator: myId,
         turnOrder: [myId],
         players: {
-            [myId]: { name, pile: [], coins: 0, upgrades: [], roundScores: [], roundState: defaultRoundState() }
+            [myId]: { name, pile:[], coins:0, upgrades:[], roundScores:[], roundState: defaultRoundState() }
         },
-        gameState: { started: false, phase: 'lobby' }
+        gameState: { started: false, phase:'lobby' }
     });
     enterWaitingRoom();
 };
@@ -568,22 +514,16 @@ document.getElementById('btn-join').onclick = async () => {
     const name = document.getElementById('player-name').value.trim();
     const code = document.getElementById('room-code-input').value.trim().toUpperCase();
     if (!name) return showToast('Enter your name');
-    if (code.length !== 4) return showToast('Enter a 4-letter code');
-    if (!myId) return showToast('Connecting… try again');
+    if (code.length!==4) return showToast('Enter a 4-letter code');
+    if (!myId) return showToast('Connecting…');
     roomCode = code;
-    roomRef = db.ref('rooms/' + roomCode);
+    roomRef = db.ref('rooms/'+roomCode);
     const snap = await roomRef.once('value');
     if (!snap.exists()) return showToast('Room not found');
     const data = snap.val();
-    if (data.gameState && data.gameState.started) return showToast('Game already started');
-    await roomRef.child('players/' + myId).set({
-        name, pile: [], coins: 0, upgrades: [], roundScores: [], roundState: defaultRoundState()
-    });
-    await roomRef.child('turnOrder').transaction(order => {
-        if (!order) order = [];
-        if (!order.includes(myId)) order.push(myId);
-        return order;
-    });
+    if (data.gameState?.started) return showToast('Game already started');
+    await roomRef.child('players/'+myId).set({ name, pile:[], coins:0, upgrades:[], roundScores:[], roundState: defaultRoundState() });
+    await roomRef.child('turnOrder').transaction(order => { if(!order)order=[]; if(!order.includes(myId))order.push(myId); return order; });
     enterWaitingRoom();
 };
 
@@ -599,65 +539,54 @@ document.getElementById('btn-leave-game').onclick = leaveRoom;
 
 async function leaveRoom() {
     if (roomRef && myId) {
-        await roomRef.child('players/' + myId).remove();
-        await roomRef.child('turnOrder').transaction(order => {
-            if (!order) return order;
-            return order.filter(id => id !== myId);
-        });
+        await roomRef.child('players/'+myId).remove();
+        await roomRef.child('turnOrder').transaction(order => { if(!order)return order; return order.filter(id=>id!==myId); });
         roomRef.off('value', onRoomUpdate);
     }
-    roomRef = null; roomCode = null; roomData = null;
+    roomRef=null; roomCode=null; roomData=null;
     clearInterval(timerInterval); clearInterval(shopTimerInterval);
     showScreen('lobby-screen');
 }
 
 document.getElementById('btn-start').onclick = async () => {
     if (!isHost) return;
-    const totalRounds = parseInt(document.getElementById('total-rounds').value, 10);
-    const playerIds = Object.keys(roomData.players);
-    const shuffledOrder = shuffle(playerIds);
-    const size = deckSizeForPlayers(playerIds.length);
-    let deck = buildDeck(size);
+    const totalRounds = parseInt(document.getElementById('total-rounds').value,10);
+    // Starting game inside a root transaction
+    await runTransaction(room => {
+        const playerIds = Object.keys(room.players);
+        const shuffledOrder = shuffle(playerIds);
+        const size = deckSizeForPlayers(playerIds.length);
+        let deck = buildDeck(size);
 
-    const players = { ...roomData.players };
-    for (const pid of playerIds) {
-        players[pid] = {
-            ...players[pid],
-            pile: [],
-            roundState: defaultRoundState(),
-            roundScores: players[pid].roundScores || [],
-        };
-        if (hasUpgrade(players[pid], 'small_start')) {
-            const lowCards = deck.filter(c => c < 40);
-            if (lowCards.length > 0) {
-                const pick = lowCards[Math.floor(Math.random() * lowCards.length)];
-                deck = deck.filter(c => c !== pick);
-                players[pid].pile = [pick];
+        const players = { ...room.players };
+        for (const pid of playerIds) {
+            players[pid] = { ...players[pid], pile: [], roundState: defaultRoundState() };
+            if (hasUpgrade(players[pid], 'small_start')) {
+                const low = deck.filter(c => c<40);
+                if (low.length) {
+                    const pick = low[Math.floor(Math.random()*low.length)];
+                    deck = deck.filter(c => c!==pick);
+                    players[pid].pile = [pick];
+                }
             }
         }
-    }
 
-    // Glass generation
-    let glassCount = 0;
-    Object.values(players).forEach(p => { if (hasUpgrade(p, 'glass')) glassCount += 5; });
-    let glassCards = [];
-    if (glassCount > 0) {
-        const shuffled = shuffle([...deck]);
-        glassCards = shuffled.slice(0, glassCount);
-    }
+        let glassCards = [];
+        for (const p of Object.values(players)) if (hasUpgrade(p,'glass')) glassCards.push(...shuffle([...deck]).slice(0,5));
+        if (glassCards.length) deck = deck.filter(c => !glassCards.includes(c));
 
-    await roomRef.update({
-        turnOrder: shuffledOrder,
-        players,
-        gameState: {
-            started: true, phase: 'playing', round: 1, totalRounds,
-            turnOrder: shuffledOrder, deck, discards: [[], [], []],
-            currentPlayerIndex: 0, turnPhase: 'action', drawnCard: null,
-            turnDeadline: Date.now() + TURN_SECONDS * 1000,
-            winner: null, shopOpen: false, shopReady: {}, roundResults: {}, totalScores: {},
-            riskCards: null, tempTopModifier: {}, pendingSteal: null, pendingSabotage: null,
+        room.players = players;
+        room.turnOrder = shuffledOrder;
+        room.gameState = {
+            started: true, phase:'playing', round:1, totalRounds,
+            turnOrder: shuffledOrder, deck, discards:[[],[],[]],
+            currentPlayerIndex:0, turnPhase:'action', drawnCard:null,
+            turnDeadline: Date.now() + TURN_SECONDS*1000,
+            shopOpen:false, shopReady:{}, roundResults:{}, totalScores:{},
+            riskCards:null, tempTopModifier:{}, pendingSteal:null, pendingSabotage:null,
             glassCards
-        }
+        };
+        return room;
     });
 };
 
@@ -669,17 +598,13 @@ function onRoomUpdate(snap) {
     const gs = roomData.gameState || {};
 
     if (!gs.started) { renderWaitingRoom(); return; }
-    if (gs.phase === 'shop') { roundEndProcessed = false; renderShop(); return; }
-    if (gs.phase === 'playing') roundEndProcessed = false;
+    if (gs.phase === 'shop') { renderShop(); return; }
     if (gs.phase === 'ended') { renderFinale(); return; }
 
     showScreen('game-screen');
     renderGame();
 
-    if (gs.phase === 'roundEnd') {
-        renderRoundOverlay();
-        if (isHost && !roundEndProcessed) processRoundEnd();
-    }
+    if (gs.phase === 'roundEnd') renderRoundOverlay();
 
     checkTurnTimeout(gs);
     checkShopTimeout(gs);
@@ -688,48 +613,46 @@ function onRoomUpdate(snap) {
 function renderWaitingRoom() {
     showScreen('waiting-screen');
     const players = roomData.players || {};
-    const list = document.getElementById('waiting-players');
-    list.innerHTML = Object.entries(players).map(([id, p]) =>
-        `<li><span>${escapeHtml(p.name)}</span>${id === roomData.creator ? '<span style="color:var(--gold)">Host</span>' : ''}</li>`
-    ).join('');
+    document.getElementById('waiting-players').innerHTML = Object.entries(players)
+        .map(([id,p]) => `<li><span>${escapeHtml(p.name)}</span>${id===roomData.creator?'<span style="color:var(--gold)">Host</span>':''}</li>`).join('');
     document.getElementById('btn-start').disabled = !isHost || Object.keys(players).length < 2;
     document.getElementById('rounds-panel').style.display = isHost ? 'block' : 'none';
 }
-function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+function escapeHtml(s) { const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
 
 // ── Render Game ──
+let wasMyTurn = false;
 function renderGame() {
     const gs = roomData.gameState;
     const players = roomData.players || {};
-    const turnOrder = gs.turnOrder || roomData.turnOrder || Object.keys(players);
+    const turnOrder = gs.turnOrder || [];
     const myIndex = turnOrder.indexOf(myId);
-    const n = turnOrder.length;
     const currentId = getCurrentPlayerId(gs);
     const me = players[myId];
 
     document.getElementById('game-room-code').textContent = roomCode;
-    document.getElementById('game-room-code').onclick = () => copyRoomCode(roomCode);
+    document.getElementById('game-room-code').onclick = ()=>copyRoomCode(roomCode);
     document.getElementById('round-info').textContent = `Round ${gs.round}/${gs.totalRounds}`;
-    document.getElementById('coin-display').textContent = `🪙 ${me?.coins || 0}`;
+    document.getElementById('coin-display').textContent = `🪙 ${me?.coins||0}`;
 
     const curName = players[currentId]?.name || '?';
-    let statusMsg = `${curName}'s turn`;
-    if (gs.turnPhase === 'deciding') statusMsg = `${curName} — Keep or Discard?`;
-    if (gs.turnPhase === 'risking') statusMsg = `${curName} — Risk It! Pick a card`;
-    if (gs.pendingSteal === myId) statusMsg = 'Your steal window!';
-    if (gs.pendingSabotage === myId) statusMsg = 'Choose sabotage target';
-    document.getElementById('status-text').textContent = statusMsg;
+    let status = `${curName}'s turn`;
+    if (gs.turnPhase === 'deciding') status = `${curName} — Keep or Discard?`;
+    if (gs.turnPhase === 'risking') status = `${curName} — Risk It! Pick a card`;
+    if (gs.pendingSteal === myId) status = 'Your steal window!';
+    if (gs.pendingSabotage === myId) status = 'Choose sabotage target';
+    document.getElementById('status-text').textContent = status;
 
     updateTimerDisplay(gs.turnDeadline);
 
     const ring = document.getElementById('player-ring');
     const radius = Math.min(window.innerWidth, window.innerHeight) * 0.35;
-    const rotDeg = myIndex >= 0 ? (180 - myIndex * (360 / n)) : 0;
-    ring.style.transform = `translate(-50%, -50%) rotate(${rotDeg}deg)`;
-
+    const rotDeg = myIndex >= 0 ? (180 - myIndex * (360 / turnOrder.length)) : 0;
+    ring.style.transform = `translate(-50%,-50%) rotate(${rotDeg}deg)`;
     ring.innerHTML = '';
+
     turnOrder.forEach((pid, i) => {
-        const angle = -90 + i * (360 / n);
+        const angle = -90 + i * (360 / turnOrder.length);
         const rad = angle * Math.PI / 180;
         const x = Math.cos(rad) * radius;
         const y = Math.sin(rad) * radius;
@@ -739,40 +662,35 @@ function renderGame() {
         const pile = p.pile || [];
 
         const slot = document.createElement('div');
-        slot.className = 'player-slot' + (isActive ? ' active-turn' : '');
-        slot.style.left = x + 'px'; slot.style.top = y + 'px';
-        slot.style.transform = `translate(-50%, -50%) rotate(${-rotDeg}deg)`;
+        slot.className = 'player-slot' + (isActive?' active-turn':'');
+        slot.style.left = x+'px'; slot.style.top = y+'px';
+        slot.style.transform = `translate(-50%,-50%) rotate(${-rotDeg}deg)`;
 
-        const cardsHtml = pile.length === 0 ?
-            '<span style="color:var(--muted);font-size:.75rem">empty</span>' :
+        const cardsHtml = pile.length===0 ? '<span style="color:var(--muted);font-size:.75rem">empty</span>' :
             pile.map(c => {
-                const isGlass = gs.glassCards && gs.glassCards.includes(c);
-                return `<div class="mini-card" style="background:${cardColor(c)}; color:#fff; text-shadow:0 1px 2px rgba(0,0,0,.6); ${isGlass ? 'border: 2px solid cyan;' : ''}">${c}</div>`;
+                const isGlass = gs.glassCards?.includes(c);
+                return `<div class="mini-card" style="background:${cardColor(c)}; color:#fff; text-shadow:0 1px 2px rgba(0,0,0,.6); ${isGlass?'border:2px solid cyan;':''}">${c}</div>`;
             }).join('');
-
         const mod = gs.tempTopModifier?.[pid];
         const modBadge = mod ? ` (+${mod})` : '';
-
-        const upgradesHtml = (p.upgrades || []).map(uId => {
-            const u = UPGRADES.find(up => up.id === uId);
-            return `<div style="font-size:0.65rem; background:var(--accent2); padding:2px 4px; border-radius:4px; white-space:nowrap;">${u ? u.name : uId}</div>`;
+        const upgradesHtml = (p.upgrades||[]).map(uId => {
+            const u = UPGRADES.find(u=>u.id===uId);
+            return `<div style="font-size:0.65rem; background:var(--accent2); padding:2px 4px; border-radius:4px; white-space:nowrap;">${u?u.name:uId}</div>`;
         }).join('');
 
         slot.innerHTML = `
-            <div class="player-name">${escapeHtml(p.name || '')}${isMe ? ' (you)' : ''}</div>
-            <div class="player-meta">${pile.length} cards · top: ${pile.length ? pile[pile.length-1] : 0}${modBadge}</div>
+            <div class="player-name">${escapeHtml(p.name||'')}${isMe?' (you)':''}</div>
+            <div class="player-meta">${pile.length} cards · top: ${pile.length?pile[pile.length-1]:0}${modBadge}</div>
             <div class="player-cards">${cardsHtml}</div>
             <div style="display:flex; flex-wrap:wrap; gap:4px; justify-content:center; margin-top:6px;">${upgradesHtml}</div>
         `;
         ring.appendChild(slot);
     });
 
-    document.getElementById('deck-count-label').textContent = 'x' + (gs.deck || []).length;
+    document.getElementById('deck-count-label').textContent = 'x'+(gs.deck||[]).length;
+    const isMyTurn = amCurrentPlayer(gs) && gs.turnPhase==='action' && gs.phase==='playing';
+    document.getElementById('btn-draw').disabled = !isMyTurn || (gs.deck||[]).length===0;
 
-    const isMyTurn = amCurrentPlayer(gs) && gs.turnPhase === 'action' && gs.phase === 'playing';
-    document.getElementById('btn-draw').disabled = !isMyTurn || (gs.deck || []).length === 0;
-
-    // Bell trigger
     if (amCurrentPlayer(gs) && !wasMyTurn) playBell();
     wasMyTurn = amCurrentPlayer(gs);
 
@@ -780,20 +698,19 @@ function renderGame() {
     discardRow.innerHTML = '';
     const discards = normalizeDiscards(gs.discards);
     discards.forEach((pile, idx) => {
-        const top = pile.length ? pile[pile.length - 1] : null;
+        const top = pile.length ? pile[pile.length-1] : null;
         const div = document.createElement('div');
         div.className = 'discard-pile';
-        const bgStyle = top !== null ? `background:${cardColor(top)}; color:#fff; text-shadow:0 1px 2px rgba(0,0,0,.6);` : '';
         div.innerHTML = `
-            <div class="card ${top !== null && top <= 10 ? 'red' : ''} ${top !== null ? '' : 'empty-slot'}" style="${bgStyle}">${top !== null ? top : 'Empty'}</div>
-            <div class="pile-label">Pile ${idx + 1}</div>
+            <div class="card ${top!==null&&top<=10?'red':''} ${top!==null?'':'empty-slot'}" style="${top!==null?`background:${cardColor(top)}; color:#fff; text-shadow:0 1px 2px rgba(0,0,0,.6);`:''}">${top!==null?top:'Empty'}</div>
+            <div class="pile-label">Pile ${idx+1}</div>
         `;
-        if (isMyTurn && top !== null) {
+        if (isMyTurn && top!==null) {
             const takeBtn = document.createElement('button');
             takeBtn.className = 'btn btn-sm btn-secondary';
             takeBtn.textContent = 'Take';
-            takeBtn.disabled = !canTakeFromDiscard(myId, top, gs);
-            takeBtn.onclick = () => takeFromDiscard(idx);
+            takeBtn.disabled = !canTakeFromDiscard(myId, top, gs, players);
+            takeBtn.onclick = ()=>takeFromDiscard(idx);
             div.appendChild(takeBtn);
         }
         discardRow.appendChild(div);
@@ -804,14 +721,11 @@ function renderGame() {
     renderAbilityBar(gs);
     renderRiskZone(gs);
 
-    // Automatic sabotage prompt
-    if (amCurrentPlayer(gs) && gs.turnPhase === 'action' && gs.phase === 'playing' &&
-        !gs.pendingSteal && !gs.drawnCard && gs.pendingSabotage !== myId &&
-        lastSabotageTurnIndex !== gs.currentPlayerIndex) {
+    if (amCurrentPlayer(gs) && gs.turnPhase==='action' && gs.phase==='playing' &&
+        !gs.pendingSteal && !gs.drawnCard && gs.pendingSabotage!==myId) {
         const me = roomData.players[myId];
-        if (hasUpgrade(me, 'sabotage') && !(me.roundState?.sabotageUsed)) {
-            lastSabotageTurnIndex = gs.currentPlayerIndex;
-            roomRef.child('gameState/pendingSabotage').set(myId);
+        if (hasUpgrade(me,'sabotage') && !me.roundState?.sabotageUsed) {
+            runTransaction(room => { room.gameState.pendingSabotage = myId; return room; });
         }
     }
 
@@ -823,85 +737,62 @@ function renderDrawnZone(gs) {
     const zone = document.getElementById('drawn-zone');
     const btns = document.getElementById('action-buttons');
     btns.innerHTML = '';
-    if (gs.turnPhase !== 'deciding' || gs.drawnCard === null || !amCurrentPlayer(gs)) {
-        zone.classList.remove('visible');
-        return;
+    if (gs.turnPhase!=='deciding' || gs.drawnCard===null || !amCurrentPlayer(gs)) {
+        zone.classList.remove('visible'); return;
     }
     zone.classList.add('visible');
     const cardVal = gs.drawnCard;
-    const cardEl = document.getElementById('drawn-card-el');
-    cardEl.textContent = cardVal;
-    cardEl.style.background = cardColor(cardVal);
-    cardEl.style.color = '#fff';
-    cardEl.style.textShadow = '0 1px 2px rgba(0,0,0,.6)';
+    document.getElementById('drawn-card-el').textContent = cardVal;
+    document.getElementById('drawn-card-el').style.cssText = `background:${cardColor(cardVal)}; color:#fff; text-shadow:0 1px 2px rgba(0,0,0,.6);`;
 
     const me = roomData.players[myId];
-    const canKeepCard = canKeep(myId, cardVal, gs);
-
-    if (canKeepCard) btns.appendChild(mkBtn('Keep', 'btn-green', () => keepCard()));
-
-    if (hasUpgrade(me, 'overcharge') && ((me.roundState?.overchargeTurnsUsed || 0) < 2)) {
-        btns.appendChild(mkBtn('+20', 'btn-gold', () => overchargeCard()));
-    }
-    if (hasUpgrade(me, 'undercharge') && ((me.roundState?.underchargeTurnsUsed || 0) < 2)) {
-        btns.appendChild(mkBtn('-20', 'btn-gold', () => underchargeCard()));
-    }
-    if (hasUpgrade(me, 'destroy') && !(me.roundState?.destroyUsed)) {
-        btns.appendChild(mkBtn('Destroy', 'btn-secondary', () => destroyCard()));
-    }
-    if (hasUpgrade(me, 'reroll')) {
-        const rs = me.roundState || {};
+    if (canKeep(myId, cardVal, gs)) btns.appendChild(mkBtn('Keep','btn-green', ()=>keepCard()));
+    if (hasUpgrade(me,'overcharge') && (me.roundState?.overchargeTurnsUsed||0)<2) btns.appendChild(mkBtn('+20','btn-gold', ()=>overchargeCard()));
+    if (hasUpgrade(me,'undercharge') && (me.roundState?.underchargeTurnsUsed||0)<2) btns.appendChild(mkBtn('-20','btn-gold', ()=>underchargeCard()));
+    if (hasUpgrade(me,'destroy') && !me.roundState?.destroyUsed) btns.appendChild(mkBtn('Destroy','btn-secondary', ()=>destroyCard()));
+    if (hasUpgrade(me,'reroll')) {
+        const rs = me.roundState||{};
         const label = rs.freeRerollUsed ? 'Reroll (1🪙)' : 'Reroll (free)';
-        btns.appendChild(mkBtn(label, 'btn-gold', () => rerollCard()));
+        btns.appendChild(mkBtn(label,'btn-gold', ()=>rerollCard()));
     }
 
     const discards = normalizeDiscards(gs.discards);
-    const emptyIdx = discards.findIndex(p => p.length === 0);
-    discards.forEach((pile, idx) => {
-        const canDiscardHere = emptyIdx === -1 || emptyIdx === idx;
-        if (canDiscardHere) btns.appendChild(mkBtn(`Discard → ${idx + 1}`, 'btn-secondary', () => discardCard(idx)));
+    const emptyIdx = discards.findIndex(p=>p.length===0);
+    discards.forEach((pile,idx)=>{
+        const canDiscardHere = emptyIdx===-1 || emptyIdx===idx;
+        if (canDiscardHere) btns.appendChild(mkBtn(`Discard → ${idx+1}`,'btn-secondary', ()=>discardCard(idx)));
     });
 }
 
 function mkBtn(text, cls, onclick) {
     const b = document.createElement('button');
-    b.className = 'btn btn-sm ' + cls;
-    b.textContent = text;
-    b.onclick = onclick;
-    return b;
+    b.className = 'btn btn-sm '+cls; b.textContent = text; b.onclick = onclick; return b;
 }
 
 function renderAbilityBar(gs) {
-    const bar = document.getElementById('ability-bar');
-    bar.innerHTML = '';
-    if (!amCurrentPlayer(gs) || gs.turnPhase !== 'action' || gs.phase !== 'playing') return;
+    const bar = document.getElementById('ability-bar'); bar.innerHTML='';
+    if (!amCurrentPlayer(gs) || gs.turnPhase!=='action' || gs.phase!=='playing') return;
     const me = roomData.players[myId];
-    const rs = me.roundState || {};
-    const pile = me.pile || [];
-    if (hasUpgrade(me, 'digit_flip') && !rs.flipUsed && pile.some(c => c >= 10 && c <= 99)) {
-        bar.appendChild(mkBtn('Digit Flip', 'btn-gold', () => openFlipModal()));
-    }
-    if (hasUpgrade(me, 'cull_weak') && !rs.cullUsed && pile.length >= 4) {
-        bar.appendChild(mkBtn('Cull the Weak', 'btn-gold', () => cullWeak()));
-    }
+    const rs = me.roundState||{};
+    const pile = me.pile||[];
+    if (hasUpgrade(me,'digit_flip') && !rs.flipUsed && pile.some(c=>c>=10&&c<=99))
+        bar.appendChild(mkBtn('Digit Flip','btn-gold', ()=>openFlipModal()));
+    if (hasUpgrade(me,'cull_weak') && !rs.cullUsed && pile.length>=4)
+        bar.appendChild(mkBtn('Cull the Weak','btn-gold', ()=>cullWeak()));
 }
 
 function renderRiskZone(gs) {
     const zone = document.getElementById('risk-zone');
-    const cards = document.getElementById('risk-cards');
-    if (gs.turnPhase !== 'risking' || !amCurrentPlayer(gs) || !gs.riskCards) {
-        zone.classList.remove('visible');
-        return;
-    }
+    if (gs.turnPhase!=='risking' || !amCurrentPlayer(gs) || !gs.riskCards) { zone.classList.remove('visible'); return; }
     zone.classList.add('visible');
-    cards.innerHTML = '';
-    gs.riskCards.forEach((card, i) => {
+    const cardsEl = document.getElementById('risk-cards');
+    cardsEl.innerHTML = '';
+    gs.riskCards.forEach((card,i)=>{
         const div = document.createElement('div');
-        div.style.textAlign = 'center';
+        div.style.textAlign='center';
         div.innerHTML = `<div class="card drawn-highlight" style="background:${cardColor(card)}; color:#fff; text-shadow:0 1px 2px rgba(0,0,0,.6);">${card}</div>`;
-        const btn = mkBtn('Pick', 'btn-green', () => pickRiskCard(i));
-        div.appendChild(btn);
-        cards.appendChild(div);
+        div.appendChild(mkBtn('Pick','btn-green', ()=>pickRiskCard(i)));
+        cardsEl.appendChild(div);
     });
 }
 
@@ -909,13 +800,10 @@ function renderStealModal(gs) {
     const modal = document.getElementById('steal-modal');
     if (gs.pendingSteal !== myId) { modal.classList.remove('visible'); return; }
     modal.classList.add('visible');
-    const targets = document.getElementById('steal-targets');
-    targets.innerHTML = '';
-    Object.entries(roomData.players || {}).forEach(([pid, p]) => {
-        if (pid === myId) return;
-        if (!p.pile || p.pile.length === 0) return;
-        const btn = mkBtn(`${p.name} (top: ${p.pile[p.pile.length-1]})`, 'btn-secondary', () => executeSteal(pid));
-        targets.appendChild(btn);
+    const targets = document.getElementById('steal-targets'); targets.innerHTML='';
+    Object.entries(roomData.players||{}).forEach(([pid,p])=>{
+        if (pid===myId || !p.pile?.length) return;
+        targets.appendChild(mkBtn(`${p.name} (top: ${p.pile[p.pile.length-1]})`,'btn-secondary', ()=>executeSteal(pid)));
     });
 }
 
@@ -923,656 +811,494 @@ function renderSabotageModal(gs) {
     const modal = document.getElementById('sabotage-modal');
     if (gs.pendingSabotage !== myId) { modal.classList.remove('visible'); return; }
     modal.classList.add('visible');
-    const targets = document.getElementById('sabotage-targets');
-    targets.innerHTML = '';
-    Object.entries(roomData.players || {}).forEach(([pid, p]) => {
-        if (pid === myId) return;
-        targets.appendChild(mkBtn(p.name, 'btn-secondary', () => executeSabotage(pid)));
+    const targets = document.getElementById('sabotage-targets'); targets.innerHTML='';
+    Object.entries(roomData.players||{}).forEach(([pid,p])=>{
+        if (pid===myId) return;
+        targets.appendChild(mkBtn(p.name,'btn-secondary', ()=>executeSabotage(pid)));
     });
 }
 
-// ── Game Actions ──
-async function drawCard() {
-    const ref = roomRef.child('gameState');
-    await ref.transaction(gs => {
-        if (!gs || gs.phase !== 'playing' || gs.turnPhase !== 'action') return;
-        const order = gs.turnOrder || [];
+// ── Game Actions (all root transactions) ──
+function drawCard() {
+    runTransaction(room => {
+        const gs = room.gameState;
+        if (gs.phase!=='playing' || gs.turnPhase!=='action') return;
+        const order = gs.turnOrder;
         if (order[gs.currentPlayerIndex] !== myId) return;
-        if (!gs.deck || gs.deck.length === 0) return;
+        if (!gs.deck?.length) return;
 
-        const player = roomData.players[myId];
+        const player = room.players[myId];
         // Rocky
-        if (hasUpgrade(player, 'rocky') && Math.floor(Math.random() * 15) === 0) {
+        if (hasUpgrade(player,'rocky') && Math.floor(Math.random()*15)===0) {
             gs.drawnCard = 0;
             gs.turnPhase = 'deciding';
-            gs.turnDeadline = Date.now() + TURN_SECONDS * 1000;
-            return gs;
+            gs.turnDeadline = Date.now() + TURN_SECONDS*1000;
+            return room;
         }
 
         let card = gs.deck.pop();
-        if (hasUpgrade(player, 'risk_it') && !(player.roundState?.riskItUsed)) {
-            const roll = Math.floor(Math.random() * 7) + 1;
-            if (roll === 1) {
-                const discards = normalizeDiscards(gs.discards);
-                const emptyIdx = discards.findIndex(p => p.length === 0);
-                const discardIdx = emptyIdx !== -1 ? emptyIdx : 0;
-                discards[discardIdx].push(card);
-                gs.discards = discards;
-
-                if (gs.deck.length < 2) {
-                    gs.drawnCard = gs.deck.pop() || null;
-                    gs.turnPhase = 'deciding';
-                    gs.turnDeadline = Date.now() + TURN_SECONDS * 1000;
-                    gs._markRiskUsed = myId;
-                    return gs;
-                }
-                const cardA = gs.deck.pop();
-                const cardB = gs.deck.pop();
-                gs.riskCards = [cardA, cardB];
+        if (hasUpgrade(player,'risk_it') && !player.roundState.riskItUsed) {
+            if (Math.floor(Math.random()*7)+1 === 1) {
+                const disc = normalizeDiscards(gs.discards);
+                const emptyIdx = disc.findIndex(p=>p.length===0);
+                disc[emptyIdx!==-1?emptyIdx:0].push(card);
+                gs.discards = disc;
+                if (gs.deck.length < 2) { gs.drawnCard = gs.deck.pop()||null; gs.turnPhase='deciding'; player.roundState.riskItUsed=true; gs.turnDeadline=Date.now()+TURN_SECONDS*1000; return room; }
+                const a = gs.deck.pop(), b = gs.deck.pop();
+                gs.riskCards = [a,b];
                 gs.turnPhase = 'risking';
-                gs.drawnCard = null;
-                gs._markRiskUsed = myId;
-                gs.turnDeadline = Date.now() + TURN_SECONDS * 1000;
-                return gs;
+                player.roundState.riskItUsed = true;
+                gs.turnDeadline = Date.now()+TURN_SECONDS*1000;
+                return room;
             }
         }
 
         gs.drawnCard = card;
         gs.turnPhase = 'deciding';
-        gs.turnDeadline = Date.now() + TURN_SECONDS * 1000;
-        return gs;
-    }, (err, committed, snap) => {
-        if (committed && snap.val()?._markRiskUsed) {
-            roomRef.child('players/' + myId + '/roundState/riskItUsed').set(true);
-            roomRef.child('gameState/_markRiskUsed').remove();
-        }
+        gs.turnDeadline = Date.now()+TURN_SECONDS*1000;
+        return room;
     });
 }
 
-async function pickRiskCard(index) {
-    await roomRef.child('gameState').transaction(gs => {
-        if (!gs || gs.turnPhase !== 'risking') return;
-        const order = gs.turnOrder || [];
-        if (order[gs.currentPlayerIndex] !== myId) return;
-        const cards = gs.riskCards;
-        if (!cards) return;
+function pickRiskCard(index) {
+    runTransaction(room => {
+        const gs = room.gameState;
+        if (gs.turnPhase!=='risking') return;
+        if (gs.turnOrder[gs.currentPlayerIndex]!==myId) return;
+        const cards = gs.riskCards; if (!cards) return;
         const chosen = cards[index];
-        const unchosen = cards[1 - index];
-        const discards = normalizeDiscards(gs.discards);
-        const emptyIdx = discards.findIndex(p => p.length === 0);
-        const discardIdx = emptyIdx !== -1 ? emptyIdx : 0;
-        discards[discardIdx].push(unchosen);
-        gs.discards = discards;
+        const unchosen = cards[1-index];
+        const disc = normalizeDiscards(gs.discards);
+        const emptyIdx = disc.findIndex(p=>p.length===0);
+        disc[emptyIdx!==-1?emptyIdx:0].push(unchosen);
+        gs.discards = disc;
 
-        const pile = roomData?.players?.[myId]?.pile ? [...roomData.players[myId].pile] : [];
-        if (pile.length > 0) pile[pile.length - 1] = chosen;
+        const player = room.players[myId];
+        const pile = player.pile||[];
+        if (pile.length>0) pile[pile.length-1] = chosen;
         else pile.push(chosen);
-        gs._riskPile = pile;
+        player.pile = pile;
         gs.riskCards = null;
         gs.turnPhase = 'action';
-        gs._endTurn = true;
-        return gs;
-    }, async (err, committed, snap) => {
-        if (!committed) return;
-        const gs = snap.val();
-        if (gs._riskPile) {
-            await roomRef.child('players/' + myId + '/pile').set(gs._riskPile);
-            await roomRef.child('gameState/_riskPile').remove();
-        }
-        if (gs._endTurn) {
-            await roomRef.child('gameState/_endTurn').remove();
-            await endTurn(myId);
-        }
+        return endTurnAfterKeep(room);
     });
 }
 
-async function overchargeCard() {
-    await roomRef.child('gameState').transaction(gs => {
-        if (!gs || gs.turnPhase !== 'deciding') return;
-        const order = gs.turnOrder || [];
-        if (order[gs.currentPlayerIndex] !== myId) return;
-        if (gs.drawnCard === null || gs.drawnCard === undefined) return;
-        const player = roomData.players[myId];
-        if (!hasUpgrade(player, 'overcharge')) return;
-        const rs = player.roundState || {};
-        if ((rs.overchargeTurnsUsed || 0) >= 2) return;
-        gs.drawnCard += 20;
-        gs._overchargeApplied = true;
-        return gs;
-    }, async (err, committed, snap) => {
-        if (!committed) return;
-        const gs = snap.val();
-        if (gs._overchargeApplied) {
-            await roomRef.child('players/' + myId + '/roundState/overchargeTurnsUsed').transaction(v => (v || 0) + 1);
-            await roomRef.child('gameState/_overchargeApplied').remove();
-        }
-    });
-}
-
-async function underchargeCard() {
-    await roomRef.child('gameState').transaction(gs => {
-        if (!gs || gs.turnPhase !== 'deciding') return;
-        const order = gs.turnOrder || [];
-        if (order[gs.currentPlayerIndex] !== myId) return;
-        if (gs.drawnCard === null || gs.drawnCard === undefined) return;
-        const player = roomData.players[myId];
-        if (!hasUpgrade(player, 'undercharge')) return;
-        const rs = player.roundState || {};
-        if ((rs.underchargeTurnsUsed || 0) >= 2) return;
-        gs.drawnCard -= 20;
-        gs._underchargeApplied = true;
-        return gs;
-    }, async (err, committed, snap) => {
-        if (!committed) return;
-        const gs = snap.val();
-        if (gs._underchargeApplied) {
-            await roomRef.child('players/' + myId + '/roundState/underchargeTurnsUsed').transaction(v => (v || 0) + 1);
-            await roomRef.child('gameState/_underchargeApplied').remove();
-        }
-    });
-}
-
-async function keepCard() {
-    await roomRef.child('gameState').transaction(gs => {
-        if (!gs || gs.turnPhase !== 'deciding') return;
-        const order = gs.turnOrder || [];
-        if (order[gs.currentPlayerIndex] !== myId) return;
+function keepCard() {
+    runTransaction(room => {
+        const gs = room.gameState;
+        if (gs.turnPhase!=='deciding' || gs.turnOrder[gs.currentPlayerIndex]!==myId) return;
         if (!canKeep(myId, gs.drawnCard, gs)) return;
-        const card = gs.drawnCard;
+        const player = room.players[myId];
+        player.pile = [...(player.pile||[]), gs.drawnCard];
         gs.drawnCard = null;
         gs.turnPhase = 'action';
-        gs._keepCard = card;
-        gs._endTurn = true;
-        return gs;
-    }, async (err, committed, snap) => {
-        if (!committed) return;
-        const gs = snap.val();
-        if (gs._keepCard !== undefined) {
-            await roomRef.child('players/' + myId + '/pile').transaction(pile => {
-                pile = pile || [];
-                pile.push(gs._keepCard);
-                return pile;
-            });
-            await roomRef.child('gameState/_keepCard').remove();
-        }
-        if (gs._endTurn) {
-            await roomRef.child('gameState/_endTurn').remove();
-            await endTurn(myId);
-        }
+        return endTurnAfterKeep(room);
     });
 }
 
-async function discardCard(pileIdx) {
-    await roomRef.child('gameState').transaction(gs => {
-        if (!gs || gs.turnPhase !== 'deciding') return;
-        const order = gs.turnOrder || [];
-        if (order[gs.currentPlayerIndex] !== myId) return;
+function discardCard(pileIdx) {
+    runTransaction(room => {
+        const gs = room.gameState;
+        if (gs.turnPhase!=='deciding' || gs.turnOrder[gs.currentPlayerIndex]!==myId) return;
         const card = gs.drawnCard;
-        if (card === null || card === undefined) return;
-        const discards = normalizeDiscards(gs.discards);
-        const emptyIdx = discards.findIndex(p => p.length === 0);
-        if (emptyIdx !== -1 && emptyIdx !== pileIdx) return;
-        discards[pileIdx].push(card);
-        gs.discards = discards;
+        if (card===null || card===undefined) return;
+        const disc = normalizeDiscards(gs.discards);
+        const emptyIdx = disc.findIndex(p=>p.length===0);
+        if (emptyIdx!==-1 && emptyIdx!==pileIdx) return;
+        disc[pileIdx].push(card);
+        gs.discards = disc;
         gs.drawnCard = null;
         gs.turnPhase = 'action';
-        gs._endTurn = true;
-        return gs;
-    }, async (err, committed, snap) => {
-        if (!committed) return;
-        const gs = snap.val();
-        if (gs._endTurn) {
-            await roomRef.child('gameState/_endTurn').remove();
-            await endTurn(myId);
-        }
+        return advanceTurn(room);
     });
 }
 
-async function destroyCard() {
-    await roomRef.child('gameState').transaction(gs => {
-        if (!gs || gs.turnPhase !== 'deciding') return;
-        const order = gs.turnOrder || [];
-        if (order[gs.currentPlayerIndex] !== myId) return;
-        gs.drawnCard = null;
-        gs.turnPhase = 'action';
-        gs._destroyUsed = true;
-        gs._endTurn = true;
-        return gs;
-    }, async (err, committed, snap) => {
-        if (!committed) return;
-        const gs = snap.val();
-        if (gs._destroyUsed) {
-            await roomRef.child('players/' + myId + '/roundState/destroyUsed').set(true);
-            await roomRef.child('gameState/_destroyUsed').remove();
-        }
-        if (gs._endTurn) {
-            await roomRef.child('gameState/_endTurn').remove();
-            await endTurn(myId);
-        }
-    });
-}
-
-async function rerollCard() {
-    const me = roomData.players[myId];
-    const rs = me.roundState || {};
-    const needsCoin = rs.freeRerollUsed;
-    if (needsCoin && (me.coins || 0) < 1) {
-        showToast('Not enough coins for reroll');
-        return;
-    }
-    await roomRef.child('gameState').transaction(gs => {
-        if (!gs || gs.turnPhase !== 'deciding') return;
-        const order = gs.turnOrder || [];
-        if (order[gs.currentPlayerIndex] !== myId) return;
-        if (!gs.deck || gs.deck.length === 0) return;
-        const card = gs.drawnCard;
-        const discards = normalizeDiscards(gs.discards);
-        const emptyIdx = discards.findIndex(p => p.length === 0);
-        const discardIdx = emptyIdx !== -1 ? emptyIdx : 0;
-        discards[discardIdx].push(card);
-        gs.discards = discards;
-        gs.drawnCard = gs.deck.pop();
-        gs._rerollUpdate = needsCoin ? 'paid' : 'free';
-        gs.turnDeadline = Date.now() + TURN_SECONDS * 1000;
-        return gs;
-    }, async (err, committed, snap) => {
-        if (!committed) return;
-        const gs = snap.val();
-        if (gs._rerollUpdate === 'free') {
-            await roomRef.child('players/' + myId + '/roundState/freeRerollUsed').set(true);
-        } else if (gs._rerollUpdate === 'paid') {
-            await roomRef.child('players/' + myId + '/coins').transaction(c => (c || 0) - 1);
-        }
-        await roomRef.child('gameState/_rerollUpdate').remove();
-    });
-}
-
-async function takeFromDiscard(pileIdx) {
-    await roomRef.child('gameState').transaction(gs => {
-        if (!gs || gs.phase !== 'playing' || gs.turnPhase !== 'action') return;
-        const order = gs.turnOrder || [];
-        if (order[gs.currentPlayerIndex] !== myId) return;
-        const discards = normalizeDiscards(gs.discards);
-        const pile = discards[pileIdx];
-        if (!pile || pile.length === 0) return;
+function takeFromDiscard(pileIdx) {
+    runTransaction(room => {
+        const gs = room.gameState;
+        if (gs.phase!=='playing' || gs.turnPhase!=='action' || gs.turnOrder[gs.currentPlayerIndex]!==myId) return;
+        const disc = normalizeDiscards(gs.discards);
+        const pile = disc[pileIdx];
+        if (!pile?.length) return;
         const card = pile.pop();
-        if (!canTakeFromDiscard(myId, card, gs)) { pile.push(card); return; }
-        gs.discards = discards;
-        gs._takeCard = card;
-        gs._endTurn = true;
-        return gs;
-    }, async (err, committed, snap) => {
-        if (!committed) return;
-        const gs = snap.val();
-        if (gs._takeCard !== undefined) {
-            await roomRef.child('players/' + myId + '/pile').transaction(pile => {
-                pile = pile || [];
-                pile.push(gs._takeCard);
-                return pile;
-            });
-            await roomRef.child('gameState/_takeCard').remove();
-        }
-        if (gs._endTurn) {
-            await roomRef.child('gameState/_endTurn').remove();
-            await endTurn(myId);
-        }
+        if (!canTakeFromDiscard(myId, card, gs, room.players)) { pile.push(card); return; }
+        gs.discards = disc;
+        const player = room.players[myId];
+        player.pile = [...(player.pile||[]), card];
+        return advanceTurn(room);
     });
 }
 
-async function cullWeak() {
-    await roomRef.child('players/' + myId).transaction(player => {
-        if (!player) return;
-        const pile = [...(player.pile || [])];
-        if (pile.length < 4) return;
-        if (player.roundState?.cullUsed) return;
-        const idx1 = Math.floor(Math.random() * pile.length); pile.splice(idx1, 1);
-        const idx2 = Math.floor(Math.random() * pile.length); pile.splice(idx2, 1);
-        pile.sort((a, b) => a - b);
-        if (pile.length >= 2) { const second = pile[1]; pile.splice(1, 1); pile.push(second); }
-        player.pile = pile;
-        player.roundState = player.roundState || defaultRoundState();
-        player.roundState.cullUsed = true;
-        return player;
-    });
-    showToast('Cull the Weak activated!');
-}
-
-async function executeFlip(cardIdx) {
-    document.getElementById('flip-modal').classList.remove('visible');
-    await roomRef.child('players/' + myId).transaction(player => {
-        if (!player || player.roundState?.flipUsed) return;
-        const pile = [...(player.pile || [])];
-        if (cardIdx >= pile.length) return;
-        const card = pile[cardIdx];
-        if (card < 10 || card > 99) return;
-        const flipped = reverseDigits(card);
-        pile.splice(cardIdx, 1);
-        if (pile.length > 0) pile[pile.length - 1] = flipped;
-        else pile.push(flipped);
-        player.pile = pile;
-        player.roundState = player.roundState || defaultRoundState();
-        player.roundState.flipUsed = true;
-        return player;
+function overchargeCard() {
+    runTransaction(room => {
+        const gs = room.gameState;
+        if (gs.turnPhase!=='deciding' || gs.turnOrder[gs.currentPlayerIndex]!==myId) return;
+        const player = room.players[myId];
+        if (!hasUpgrade(player,'overcharge') || (player.roundState.overchargeTurnsUsed||0)>=2) return;
+        gs.drawnCard += 20;
+        player.roundState.overchargeTurnsUsed = (player.roundState.overchargeTurnsUsed||0)+1;
+        return room;
     });
 }
-
-async function endTurn(playerId) {
-    const gs = roomData.gameState;
-    const player = roomData.players[playerId];
-    const pile = player?.pile || [];
-    const top = pile.length ? pile[pile.length - 1] : 0;
-    const deckEmpty = !(gs.deck && gs.deck.length > 0);
-    const hasTargets = Object.entries(roomData.players || {}).some(([id, p]) => id !== myId && p.pile?.length > 0);
-
-    if (playerId === myId && hasUpgrade(player, 'thief_reflex') && !(player.roundState?.stealUsed) && top >= 80 && !deckEmpty && hasTargets) {
-        await roomRef.child('gameState/pendingSteal').set(myId);
-        return;
-    }
-    await advanceTurn(deckEmpty);
-}
-
-async function skipSteal() {
-    document.getElementById('steal-modal').classList.remove('visible');
-    await roomRef.child('players/' + myId + '/roundState/stealUsed').set(true);
-    await roomRef.child('gameState/pendingSteal').remove();
-    await advanceTurn(false);
-}
-
-async function executeSteal(targetId) {
-    document.getElementById('steal-modal').classList.remove('visible');
-    const target = roomData.players[targetId];
-    if (!target?.pile?.length) return skipSteal();
-    const stolen = target.pile[target.pile.length - 1];
-    await roomRef.child('players/' + targetId + '/pile').transaction(pile => { pile = pile || []; pile.pop(); return pile; });
-    await roomRef.child('players/' + myId + '/pile').transaction(pile => {
-        pile = pile || [];
-        if (pile.length > 0) pile[pile.length - 1] = stolen;
-        else pile.push(stolen);
-        return pile;
+function underchargeCard() {
+    runTransaction(room => {
+        const gs = room.gameState;
+        if (gs.turnPhase!=='deciding' || gs.turnOrder[gs.currentPlayerIndex]!==myId) return;
+        const player = room.players[myId];
+        if (!hasUpgrade(player,'undercharge') || (player.roundState.underchargeTurnsUsed||0)>=2) return;
+        gs.drawnCard -= 20;
+        player.roundState.underchargeTurnsUsed = (player.roundState.underchargeTurnsUsed||0)+1;
+        return room;
     });
-    await roomRef.child('players/' + myId + '/roundState/stealUsed').set(true);
-    await roomRef.child('gameState/pendingSteal').remove();
-    await advanceTurn(false);
 }
-
-async function skipSabotage() {
-    document.getElementById('sabotage-modal').classList.remove('visible');
-    await roomRef.child('players/' + myId + '/roundState/sabotageUsed').set(true);
-    await roomRef.child('gameState/pendingSabotage').remove();
-}
-
-async function executeSabotage(targetId) {
-    document.getElementById('sabotage-modal').classList.remove('visible');
-    await roomRef.child('gameState/tempTopModifier/' + targetId).set(15);
-    await roomRef.child('players/' + myId + '/roundState/sabotageUsed').set(true);
-    await roomRef.child('gameState/pendingSabotage').remove();
-}
-
-async function advanceTurn(roundEnding) {
-    await roomRef.child('gameState').transaction(gs => {
-        if (!gs) return;
-        const prevId = getCurrentPlayerId(gs);
-        if (gs.tempTopModifier && gs.tempTopModifier[prevId]) gs.tempTopModifier[prevId] = null;
-
-        if (roundEnding || gs.phase === 'roundEnd') {
-            gs.phase = 'roundEnd';
-            gs.turnPhase = 'action';
-            gs.drawnCard = null;
-            return gs;
-        }
-        const order = gs.turnOrder || [];
-        gs.currentPlayerIndex = (gs.currentPlayerIndex + 1) % order.length;
-        gs.turnPhase = 'action';
+function destroyCard() {
+    runTransaction(room => {
+        const gs = room.gameState;
+        if (gs.turnPhase!=='deciding' || gs.turnOrder[gs.currentPlayerIndex]!==myId) return;
         gs.drawnCard = null;
-        gs.riskCards = null;
-        gs.turnDeadline = Date.now() + TURN_SECONDS * 1000;
-        return gs;
-    }, async (err, committed, snap) => {
-        if (!committed) return;
-        const gs = snap.val();
+        gs.turnPhase = 'action';
+        room.players[myId].roundState.destroyUsed = true;
+        return advanceTurn(room);
+    });
+}
+function rerollCard() {
+    runTransaction(room => {
+        const gs = room.gameState;
+        if (gs.turnPhase!=='deciding' || gs.turnOrder[gs.currentPlayerIndex]!==myId) return;
+        const player = room.players[myId];
+        if (!hasUpgrade(player,'reroll')) return;
+        const freeUsed = player.roundState.freeRerollUsed;
+        if (freeUsed && (player.coins||0)<1) return;
+        const card = gs.drawnCard;
+        const disc = normalizeDiscards(gs.discards);
+        const emptyIdx = disc.findIndex(p=>p.length===0);
+        disc[emptyIdx!==-1?emptyIdx:0].push(card);
+        gs.discards = disc;
+        gs.drawnCard = gs.deck.pop();
+        if (!freeUsed) player.roundState.freeRerollUsed = true;
+        else player.coins -= 1;
+        gs.turnDeadline = Date.now()+TURN_SECONDS*1000;
+        return room;
+    });
+}
+function cullWeak() {
+    runTransaction(room => {
+        const player = room.players[myId];
+        const pile = [...(player.pile||[])];
+        if (pile.length<4 || player.roundState.cullUsed) return;
+        pile.splice(Math.floor(Math.random()*pile.length),1);
+        pile.splice(Math.floor(Math.random()*pile.length),1);
+        pile.sort((a,b)=>a-b);
+        if (pile.length>=2) { const second = pile[1]; pile.splice(1,1); pile.push(second); }
+        player.pile = pile;
+        player.roundState.cullUsed = true;
+        return room;
+    }).then(()=> showToast('Cull the Weak activated!'));
+}
 
-        // Glass breakage (host only)
-        if (!roundEnding && gs.phase !== 'roundEnd' && isHost) {
-            const nextPid = gs.turnOrder[gs.currentPlayerIndex];
-            const pSnap = await roomRef.child('players/' + nextPid).once('value');
-            const p = pSnap.val();
-            if (p && p.pile && gs.glassCards && gs.glassCards.length > 0) {
-                const newPile = p.pile.filter(c => {
-                    if (gs.glassCards.includes(c)) return Math.random() >= (1/6);
-                    return true;
-                });
-                if (newPile.length !== p.pile.length) {
-                    await roomRef.child('players/' + nextPid + '/pile').set(newPile);
-                }
-            }
-        }
-
-        if (gs.phase === 'roundEnd' && isHost) {
-            await processRoundEnd();
-        }
+function openFlipModal() {
+    const me = roomData.players[myId];
+    const pile = me.pile||[];
+    const targets = document.getElementById('flip-targets'); targets.innerHTML='';
+    pile.forEach((card,idx)=>{
+        if (card>=10 && card<=99)
+            targets.appendChild(mkBtn(`${card} → ${reverseDigits(card)}`,'btn-secondary', ()=>executeFlip(idx)));
+    });
+    document.getElementById('flip-modal').classList.add('visible');
+}
+function executeFlip(cardIdx) {
+    document.getElementById('flip-modal').classList.remove('visible');
+    runTransaction(room => {
+        const player = room.players[myId];
+        if (player.roundState.flipUsed) return;
+        const pile = [...(player.pile||[])];
+        if (cardIdx>=pile.length) return;
+        const card = pile[cardIdx];
+        if (card<10||card>99) return;
+        pile[cardIdx] = reverseDigits(card);
+        player.pile = pile;
+        player.roundState.flipUsed = true;
+        return room;
     });
 }
 
-async function processRoundEnd() {
-    if (roundEndProcessed) return;
-    roundEndProcessed = true;
-    const gs = roomData.gameState;
-    const players = roomData.players || {};
+// ── Turn / Round end logic ──
+function advanceTurn(room, deckIsEmpty) {
+    const gs = room.gameState;
+    // Clear temp modifier of previous player
+    const prevId = gs.turnOrder[gs.currentPlayerIndex];
+    if (gs.tempTopModifier?.[prevId]) delete gs.tempTopModifier[prevId];
+
+    if (deckIsEmpty || !gs.deck?.length) {
+        return processRoundEnd(room);
+    }
+    // Next player
+    gs.currentPlayerIndex = (gs.currentPlayerIndex + 1) % gs.turnOrder.length;
+    gs.turnPhase = 'action';
+    gs.drawnCard = null;
+    gs.riskCards = null;
+    gs.turnDeadline = Date.now() + TURN_SECONDS*1000;
+    // Glass breakage
+    const nextId = gs.turnOrder[gs.currentPlayerIndex];
+    const nextPlayer = room.players[nextId];
+    if (nextPlayer?.pile && gs.glassCards?.length) {
+        nextPlayer.pile = nextPlayer.pile.filter(c => {
+            if (gs.glassCards.includes(c)) return Math.random() >= (1/6);
+            return true;
+        });
+    }
+    return room;
+}
+
+function endTurnAfterKeep(room) {
+    // Called after keep/risk pick where deck might still have cards, but turn should end
+    const gs = room.gameState;
+    const deckEmpty = !gs.deck?.length;
+    // Check steal activation
+    const player = room.players[myId];
+    const pile = player.pile||[];
+    const top = pile.length ? pile[pile.length-1] : 0;
+    const hasTargets = Object.entries(room.players).some(([id,p])=> id!==myId && p.pile?.length);
+    if (hasUpgrade(player,'thief_reflex') && !player.roundState.stealUsed && top>=80 && !deckEmpty && hasTargets) {
+        gs.pendingSteal = myId;
+        return room;
+    }
+    return advanceTurn(room, deckEmpty);
+}
+
+function executeSteal(targetId) {
+    document.getElementById('steal-modal').classList.remove('visible');
+    runTransaction(room => {
+        const gs = room.gameState;
+        if (gs.pendingSteal !== myId) return;
+        const target = room.players[targetId];
+        if (!target?.pile?.length) return;
+        const stolen = target.pile.pop();
+        const thief = room.players[myId];
+        thief.pile = [...(thief.pile||[])];
+        if (thief.pile.length) thief.pile[thief.pile.length-1] = stolen;
+        else thief.pile.push(stolen);
+        thief.roundState.stealUsed = true;
+        gs.pendingSteal = null;
+        return advanceTurn(room, false);
+    });
+}
+function skipSteal() {
+    document.getElementById('steal-modal').classList.remove('visible');
+    runTransaction(room => {
+        room.players[myId].roundState.stealUsed = true;
+        room.gameState.pendingSteal = null;
+        return advanceTurn(room, false);
+    });
+}
+
+function executeSabotage(targetId) {
+    document.getElementById('sabotage-modal').classList.remove('visible');
+    runTransaction(room => {
+        room.gameState.tempTopModifier = room.gameState.tempTopModifier || {};
+        room.gameState.tempTopModifier[targetId] = 15;
+        room.players[myId].roundState.sabotageUsed = true;
+        room.gameState.pendingSabotage = null;
+        return room;
+    });
+}
+function skipSabotage() {
+    document.getElementById('sabotage-modal').classList.remove('visible');
+    runTransaction(room => {
+        room.players[myId].roundState.sabotageUsed = true;
+        room.gameState.pendingSabotage = null;
+        return room;
+    });
+}
+
+function processRoundEnd(room) {
+    const gs = room.gameState;
+    const players = room.players;
+    const piles = {}, tops = {};
+    Object.entries(players).forEach(([pid,p])=>{
+        const pile = p.pile||[];
+        piles[pid] = [...pile];
+        tops[pid] = pile.length ? pile[pile.length-1] : 0;
+    });
 
     let maxCards = -1, winners = [];
-    const piles = {}, tops = {};
-    Object.entries(players).forEach(([pid, p]) => {
-        const pile = p.pile || [];
-        piles[pid] = [...pile];
-        tops[pid] = pile.length ? pile[pile.length - 1] : 0;
+    Object.entries(piles).forEach(([pid,pile])=>{
         if (pile.length > maxCards) { maxCards = pile.length; winners = [pid]; }
         else if (pile.length === maxCards) winners.push(pid);
     });
     if (winners.length > 1) {
-        let minTop = Infinity; let tieWinners = [];
-        winners.forEach(pid => {
-            if (tops[pid] < minTop) { minTop = tops[pid]; tieWinners = [pid]; }
-            else if (tops[pid] === minTop) tieWinners.push(pid);
-        });
+        let minTop = Infinity, tieWinners = [];
+        winners.forEach(pid => { if (tops[pid] < minTop) { minTop = tops[pid]; tieWinners = [pid]; } else if (tops[pid]===minTop) tieWinners.push(pid); });
         winners = tieWinners;
     }
+    let minTop = Infinity, lowTopPlayers = [];
+    Object.entries(tops).forEach(([pid,top])=>{ if (top < minTop) { minTop = top; lowTopPlayers = [pid]; } else if (top===minTop) lowTopPlayers.push(pid); });
 
-    let minTop = Infinity; let lowTopPlayers = [];
-    Object.entries(tops).forEach(([pid, top]) => {
-        if (top < minTop) { minTop = top; lowTopPlayers = [pid]; }
-        else if (top === minTop) lowTopPlayers.push(pid);
-    });
-
-    const updates = {};
-    Object.keys(players).forEach(pid => {
-        const pileLen = (players[pid].pile || []).length;
-        updates[`players/${pid}/roundScores`] = [...(players[pid].roundScores || []), pileLen];
-        let coins = (players[pid].coins || 0) + 3;
-        if (lowTopPlayers.includes(pid)) coins += 1;
-        updates[`players/${pid}/coins`] = coins;
-        updates[`players/${pid}/roundState`] = defaultRoundState();
-    });
-    updates['gameState/roundResults'] = { round: gs.round, piles, winners, lowTopBonus: lowTopPlayers };
+    // Update scores, coins, reset piles
     const totalScores = gs.totalScores || {};
     Object.keys(players).forEach(pid => {
-        totalScores[pid] = (totalScores[pid] || 0) + (players[pid].pile || []).length;
+        const p = players[pid];
+        const len = (p.pile||[]).length;
+        p.roundScores = [...(p.roundScores||[]), len];
+        totalScores[pid] = (totalScores[pid]||0) + len;
+        p.coins = (p.coins||0) + 3 + (lowTopPlayers.includes(pid)?1:0);
+        p.pile = [];
+        p.roundState = defaultRoundState();
     });
-    updates['gameState/totalScores'] = totalScores;
+    gs.totalScores = totalScores;
+    gs.roundResults = { round: gs.round, piles, winners, lowTopBonus: lowTopPlayers };
 
-    await roomRef.update(updates);
-
-    if (isHost) {
-        setTimeout(async () => {
-            const currentGs = (await roomRef.child('gameState').once('value')).val();
-            if (!currentGs || currentGs.phase !== 'roundEnd') return;
-            if (currentGs.round >= currentGs.totalRounds) {
-                await roomRef.child('gameState/phase').set('ended');
-                await roomRef.child('gameState/winner').set(findGrandWinner(totalScores));
-            } else {
-                await openShopHost();
-            }
-        }, 4000);
+    if (gs.round >= gs.totalRounds) {
+        gs.phase = 'ended';
+        gs.winner = Object.entries(totalScores).sort((a,b)=>b[1]-a[1])[0][0];
+    } else {
+        // Open shop
+        gs.phase = 'shop';
+        gs.shopOpen = true;
+        gs.shopDeadline = Date.now() + SHOP_SECONDS*1000;
+        gs.shopReady = {};
+        const offerings = {};
+        Object.keys(players).forEach(pid => {
+            const owned = players[pid].upgrades||[];
+            const avail = shuffle(UPGRADES.filter(u=>!owned.includes(u.id)));
+            offerings[pid] = avail.slice(0,3).map(u=>u.id);
+        });
+        gs.shopOfferings = offerings;
     }
+    return room;
 }
 
-async function openShopHost() {
-    if (!isHost) return;
-    shopAdvanceTriggered = false; roundEndProcessed = false;
-    const offerings = {};
-    Object.entries(roomData.players || {}).forEach(([pid, p]) => {
-        const owned = p.upgrades || [];
-        const avail = shuffle(UPGRADES.filter(u => !owned.includes(u.id)));
-        offerings[pid] = avail.slice(0, 3).map(u => u.id);
+// ── Shop ──
+function renderShop() {
+    showScreen('shop-screen');
+    const gs = roomData.gameState;
+    const me = roomData.players[myId];
+    document.getElementById('shop-coins').textContent = `🪙 ${me?.coins||0} coins`;
+    updateShopTimerDisplay(gs.shopDeadline);
+    const grid = document.getElementById('upgrade-grid'); grid.innerHTML='';
+    const myOfferings = gs.shopOfferings?.[myId]||[];
+    myOfferings.forEach(uId=>{
+        const up = UPGRADES.find(u=>u.id===uId); if(!up) return;
+        const owned = (me?.upgrades||[]).includes(up.id);
+        const canBuy = !owned && (me?.coins||0) >= up.cost;
+        const div = document.createElement('div'); div.className='upgrade-card';
+        div.innerHTML = `
+            <div class="upgrade-info"><div class="upgrade-name">${up.name}</div><div class="upgrade-desc">${up.desc}</div></div>
+            <div>${owned ? '<span class="upgrade-owned">Owned</span>' : `<span class="upgrade-cost">${up.cost} 🪙</span><button class="btn btn-sm btn-gold" ${canBuy?'':'disabled'}>Buy</button>`}</div>
+        `;
+        if (!owned) div.querySelector('button').onclick = ()=>buyUpgrade(up.id, up.cost);
+        grid.appendChild(div);
     });
-    await roomRef.child('gameState').update({
-        phase: 'shop', shopOpen: true,
-        shopDeadline: Date.now() + SHOP_SECONDS * 1000,
-        shopReady: {}, shopOfferings: offerings
-    });
-}
-function findGrandWinner(totalScores) {
-    let max = -1, winners = [];
-    Object.entries(totalScores).forEach(([pid, score]) => {
-        if (score > max) { max = score; winners = [pid]; }
-        else if (score === max) winners.push(pid);
-    });
-    return winners[0];
+    const ready = gs.shopReady||{};
+    const total = Object.keys(roomData.players||{}).length;
+    const readyCount = Object.values(ready).filter(Boolean).length;
+    document.getElementById('ready-status').textContent = `${readyCount}/${total} players ready`;
+    document.getElementById('btn-shop-ready').disabled = !!ready[myId];
+    document.getElementById('btn-shop-ready').textContent = ready[myId] ? 'Ready ✓' : 'Ready';
 }
 
+document.getElementById('btn-shop-ready').onclick = ()=> {
+    runTransaction(room => {
+        room.gameState.shopReady = room.gameState.shopReady || {};
+        room.gameState.shopReady[myId] = true;
+        const allReady = Object.keys(room.players).every(pid => room.gameState.shopReady[pid]);
+        if (allReady) startNextRoundInside(room);
+        return room;
+    });
+};
+
+async function buyUpgrade(id, cost) {
+    await runTransaction(room => {
+        const player = room.players[myId];
+        if (!player || (player.upgrades||[]).includes(id) || (player.coins||0) < cost) return;
+        player.coins -= cost;
+        player.upgrades = [...(player.upgrades||[]), id];
+        return room;
+    });
+    showToast('Purchased ' + UPGRADES.find(u=>u.id===id).name + '!');
+    await runTransaction(room => {
+        room.gameState.shopReady = room.gameState.shopReady || {};
+        room.gameState.shopReady[myId] = true;
+        const allReady = Object.keys(room.players).every(pid => room.gameState.shopReady[pid]);
+        if (allReady) startNextRoundInside(room);
+        return room;
+    });
+}
+
+function startNextRoundInside(room) {
+    const gs = room.gameState;
+    if (gs.phase !== 'shop') return;
+    const playerIds = Object.keys(room.players);
+    const shuffledOrder = shuffle(playerIds);
+    const size = deckSizeForPlayers(playerIds.length);
+    let deck = buildDeck(size);
+
+    const players = { ...room.players };
+    for (const pid of playerIds) {
+        players[pid] = { ...players[pid], pile: [], roundState: defaultRoundState() };
+        if (hasUpgrade(players[pid], 'small_start')) {
+            const low = deck.filter(c => c<40);
+            if (low.length) {
+                const pick = low[Math.floor(Math.random()*low.length)];
+                deck = deck.filter(c => c!==pick);
+                players[pid].pile = [pick];
+            }
+        }
+    }
+
+    let glassCards = [];
+    for (const p of Object.values(players)) if (hasUpgrade(p,'glass')) glassCards.push(...shuffle([...deck]).slice(0,5));
+    if (glassCards.length) deck = deck.filter(c => !glassCards.includes(c));
+
+    room.players = players;
+    room.turnOrder = shuffledOrder;
+    room.gameState = {
+        ...gs, phase:'playing', round: gs.round+1,
+        turnOrder: shuffledOrder, deck, discards:[[],[],[]],
+        currentPlayerIndex:0, turnPhase:'action', drawnCard:null,
+        turnDeadline: Date.now() + TURN_SECONDS*1000,
+        shopOpen:false, shopReady:{}, roundResults:{}, riskCards:null,
+        tempTopModifier:{}, pendingSteal:null, pendingSabotage:null, shopOfferings:null,
+        glassCards
+    };
+    return room;
+}
+
+// ── Overlays ──
 function renderRoundOverlay() {
     const gs = roomData.gameState;
-    const rr = gs.roundResults;
-    if (!rr) return;
+    const rr = gs.roundResults; if (!rr) return;
     const overlay = document.getElementById('round-overlay');
     overlay.classList.add('visible');
     document.getElementById('round-overlay-title').textContent = `Round ${rr.round} Complete`;
     const table = document.getElementById('round-results-table');
     table.innerHTML = '<tr><th>Player</th><th>Cards</th><th>Top</th></tr>';
-    Object.entries(rr.piles || {}).forEach(([pid, pile]) => {
-        const p = roomData.players?.[pid] || {};
+    Object.entries(rr.piles||{}).forEach(([pid,pile])=>{
+        const p = roomData.players[pid]||{};
         const isWinner = rr.winners.includes(pid);
-        table.innerHTML += `<tr class="${isWinner ? 'winner-row' : ''}"><td>${escapeHtml(p.name || '')}${isWinner ? ' 👑' : ''}</td><td>${pile.length}</td><td>${pile.length ? pile[pile.length-1] : 0}</td></tr>`;
+        table.innerHTML += `<tr class="${isWinner?'winner-row':''}"><td>${escapeHtml(p.name||'')}${isWinner?' 👑':''}</td><td>${pile.length}</td><td>${pile.length?pile[pile.length-1]:0}</td></tr>`;
     });
-    document.getElementById('round-coin-msg').textContent = 'Everyone received 3 coins' + (rr.lowTopBonus?.length ? ` (+1 bonus for lowest top: ${rr.lowTopBonus.map(id => roomData.players[id]?.name || id).join(', ')})` : '');
-    const isFinal = gs.round >= gs.totalRounds;
-    document.getElementById('round-next-msg').textContent = isFinal ? 'Calculating final scores…' : 'Shop opening…';
-    const forceBtn = document.getElementById('btn-force-shop');
-    if (isHost && !isFinal) { forceBtn.style.display = 'inline-block'; forceBtn.onclick = () => openShopHost(); }
-    else forceBtn.style.display = 'none';
+    document.getElementById('round-coin-msg').textContent = 'Everyone received 3 coins' + (rr.lowTopBonus?.length ? ` (+1 bonus for lowest top)`:'');
+    document.getElementById('round-next-msg').textContent = gs.round>=gs.totalRounds ? 'Calculating final scores…' : 'Shop opening…';
     if (gs.phase !== 'roundEnd') overlay.classList.remove('visible');
 }
 
 function renderFinale() {
     showScreen('game-screen');
     const gs = roomData.gameState;
-    const overlay = document.getElementById('finale-overlay');
-    overlay.classList.add('visible');
+    document.getElementById('finale-overlay').classList.add('visible');
     document.getElementById('round-overlay').classList.remove('visible');
     const table = document.getElementById('finale-table');
     table.innerHTML = '<tr><th>Player</th><th>Total Cards</th><th>Coins Left</th></tr>';
-    const scores = gs.totalScores || {};
-    const sorted = Object.entries(scores).sort((a, b) => b[1] - a[1]);
-    sorted.forEach(([pid, score], i) => {
-        const p = roomData.players[pid] || {};
-        table.innerHTML += `<tr class="${i === 0 ? 'winner-row' : ''}"><td>${escapeHtml(p.name || '')}${i === 0 ? ' 🏆' : ''}</td><td>${score}</td><td>${p.coins || 0}</td></tr>`;
+    const scores = gs.totalScores||{};
+    const sorted = Object.entries(scores).sort((a,b)=>b[1]-a[1]);
+    sorted.forEach(([pid,score],i)=>{
+        const p = roomData.players[pid]||{};
+        table.innerHTML += `<tr class="${i===0?'winner-row':''}"><td>${escapeHtml(p.name||'')}${i===0?' 🏆':''}</td><td>${score}</td><td>${p.coins||0}</td></tr>`;
     });
 }
-
 document.getElementById('btn-back-lobby').onclick = leaveRoom;
-
-// ── Shop ──
-function renderShop() {
-    showScreen('shop-screen');
-    document.getElementById('round-overlay').classList.remove('visible');
-    const gs = roomData.gameState;
-    const me = roomData.players[myId];
-    document.getElementById('shop-coins').textContent = `🪙 ${me?.coins || 0} coins`;
-    updateShopTimerDisplay(gs.shopDeadline);
-    const grid = document.getElementById('upgrade-grid');
-    grid.innerHTML = '';
-    const myOfferings = gs.shopOfferings?.[myId] || [];
-    myOfferings.forEach(uId => {
-        const up = UPGRADES.find(u => u.id === uId);
-        if (!up) return;
-        const owned = (me?.upgrades || []).includes(up.id);
-        const canBuy = !owned && (me?.coins || 0) >= up.cost;
-        const div = document.createElement('div');
-        div.className = 'upgrade-card';
-        div.innerHTML = `
-            <div class="upgrade-info"><div class="upgrade-name">${up.name}</div><div class="upgrade-desc">${up.desc}</div></div>
-            <div>${owned ? '<span class="upgrade-owned">Owned</span>' : `<span class="upgrade-cost">${up.cost} 🪙</span><button class="btn btn-sm btn-gold" ${canBuy ? '' : 'disabled'}>Buy</button>`}</div>
-        `;
-        if (!owned) div.querySelector('button').onclick = () => buyUpgrade(up.id, up.cost);
-        grid.appendChild(div);
-    });
-    const ready = gs.shopReady || {};
-    const total = Object.keys(roomData.players || {}).length;
-    const readyCount = Object.values(ready).filter(Boolean).length;
-    document.getElementById('ready-status').textContent = `${readyCount}/${total} players ready`;
-    document.getElementById('btn-shop-ready').disabled = !!ready[myId];
-    document.getElementById('btn-shop-ready').textContent = ready[myId] ? 'Ready ✓' : 'Ready';
-    if (isHost && readyCount >= total && total > 0 && !shopAdvanceTriggered) { shopAdvanceTriggered = true; startNextRound(); }
-}
-
-document.getElementById('btn-shop-ready').onclick = async () => {
-    await roomRef.child('gameState/shopReady/' + myId).set(true);
-};
-
-async function buyUpgrade(id, cost) {
-    const me = roomData.players[myId];
-    if ((me?.upgrades || []).includes(id)) return;
-    if ((me?.coins || 0) < cost) return showToast('Not enough coins');
-    await roomRef.child('players/' + myId).transaction(player => {
-        if (!player) return;
-        if ((player.upgrades || []).includes(id)) return;
-        if ((player.coins || 0) < cost) return;
-        player.coins = (player.coins || 0) - cost;
-        player.upgrades = [...(player.upgrades || []), id];
-        return player;
-    });
-    showToast('Purchased ' + UPGRADES.find(u => u.id === id).name + '!');
-    await roomRef.child('gameState/shopReady/' + myId).set(true);
-}
-
-async function startNextRound() {
-    if (!isHost) return;
-    const gs = roomData.gameState;
-    if (gs.phase !== 'shop') return;
-    const playerIds = Object.keys(roomData.players);
-    const shuffledOrder = shuffle(playerIds);
-    const size = deckSizeForPlayers(playerIds.length);
-    let deck = buildDeck(size);
-
-    const players = { ...roomData.players };
-    for (const pid of playerIds) {
-        players[pid] = { ...players[pid], pile: [], roundState: defaultRoundState() };
-        if (hasUpgrade(players[pid], 'small_start')) {
-            const lowCards = deck.filter(c => c < 40);
-            if (lowCards.length > 0) {
-                const pick = lowCards[Math.floor(Math.random() * lowCards.length)];
-                deck = deck.filter(c => c !== pick);
-                players[pid].pile = [pick];
-            }
-        }
-    }
-
-    let glassCount = 0;
-    Object.values(players).forEach(p => { if (hasUpgrade(p, 'glass')) glassCount += 5; });
-    let glassCards = [];
-    if (glassCount > 0) { const shuffled = shuffle([...deck]); glassCards = shuffled.slice(0, glassCount); }
-
-    await roomRef.update({
-        turnOrder: shuffledOrder, players,
-        gameState: {
-            ...gs, phase: 'playing', round: gs.round + 1,
-            turnOrder: shuffledOrder, deck, discards: [[], [], []],
-            currentPlayerIndex: 0, turnPhase: 'action', drawnCard: null,
-            turnDeadline: Date.now() + TURN_SECONDS * 1000,
-            shopOpen: false, shopReady: {}, roundResults: {}, riskCards: null,
-            tempTopModifier: {}, pendingSteal: null, pendingSabotage: null, shopOfferings: null, glassCards
-        }
-    });
-}
 
 // ── Timers ──
 function updateTimerDisplay(deadline) {
@@ -1580,8 +1306,8 @@ function updateTimerDisplay(deadline) {
     const el = document.getElementById('timer');
     function tick() {
         if (!deadline) { el.textContent = '--'; return; }
-        const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
-        el.textContent = remaining; el.classList.toggle('urgent', remaining <= 5);
+        const rem = Math.max(0, Math.ceil((deadline - Date.now())/1000));
+        el.textContent = rem; el.classList.toggle('urgent', rem<=5);
     }
     tick(); timerInterval = setInterval(tick, 250);
 }
@@ -1590,61 +1316,54 @@ function updateShopTimerDisplay(deadline) {
     const el = document.getElementById('shop-timer');
     function tick() {
         if (!deadline) { el.textContent = '--'; return; }
-        const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
-        el.textContent = remaining;
+        el.textContent = Math.max(0, Math.ceil((deadline - Date.now())/1000));
     }
     tick(); shopTimerInterval = setInterval(tick, 250);
 }
+
 async function checkTurnTimeout(gs) {
-    if (gs.phase !== 'playing' || !gs.turnDeadline) return;
-    if (Date.now() < gs.turnDeadline) return;
+    if (gs.phase!=='playing' || !gs.turnDeadline || Date.now() > gs.turnDeadline) return;
     if (getCurrentPlayerId(gs) !== myId) return;
-    if (gs.turnPhase === 'deciding' && gs.drawnCard !== null) {
-        const discards = normalizeDiscards(gs.discards);
-        const emptyIdx = discards.findIndex(p => p.length === 0);
-        const idx = emptyIdx !== -1 ? emptyIdx : 0;
-        await discardCard(idx);
+    // Timeout actions
+    if (gs.turnPhase === 'deciding') {
+        const disc = normalizeDiscards(gs.discards);
+        const emptyIdx = disc.findIndex(p=>p.length===0);
+        await discardCard(emptyIdx!==-1 ? emptyIdx : 0);
     } else if (gs.turnPhase === 'risking') {
-        const cards = gs.riskCards || [0, 0];
-        await pickRiskCard(cards[0] >= cards[1] ? 0 : 1);
+        const cards = gs.riskCards||[0,0];
+        await pickRiskCard(cards[0]>=cards[1]?0:1);
     } else if (gs.turnPhase === 'action') {
-        await endTurn(myId);
+        await runTransaction(room => advanceTurn(room, !room.gameState.deck?.length));
     }
 }
 async function checkShopTimeout(gs) {
-    if (gs.phase !== 'shop' || !gs.shopDeadline) return;
-    if (Date.now() < gs.shopDeadline) return;
-    const updates = {};
-    Object.keys(roomData.players || {}).forEach(pid => { updates[`gameState/shopReady/${pid}`] = true; });
-    await roomRef.update(updates);
-    if (isHost) setTimeout(() => startNextRound(), 500);
-}
-
-// ── Tutorial modal controls ──
-document.getElementById('btn-tutorial').onclick = () => {
-    document.getElementById('tutorial-modal').style.display = 'block';
-};
-document.getElementById('btn-close-tutorial').onclick = () => {
-    document.getElementById('tutorial-modal').style.display = 'none';
-};
-
-// Steal/Sabotage skip buttons
-document.getElementById('btn-skip-steal').onclick = () => skipSteal();
-document.getElementById('btn-skip-sabotage').onclick = () => skipSabotage();
-document.getElementById('btn-cancel-flip').onclick = () => document.getElementById('flip-modal').classList.remove('visible');
-function openFlipModal() {
-    const me = roomData.players[myId];
-    const pile = me.pile || [];
-    const targets = document.getElementById('flip-targets');
-    targets.innerHTML = '';
-    pile.forEach((card, idx) => {
-        if (card >= 10 && card <= 99) {
-            const flipped = reverseDigits(card);
-            targets.appendChild(mkBtn(`${card} → ${flipped}`, 'btn-secondary', () => executeFlip(idx)));
-        }
+    if (gs.phase!=='shop' || !gs.shopDeadline || Date.now() > gs.shopDeadline) return;
+    await runTransaction(room => {
+        Object.keys(room.players).forEach(pid => { room.gameState.shopReady[pid] = true; });
+        startNextRoundInside(room);
+        return room;
     });
-    document.getElementById('flip-modal').classList.add('visible');
 }
+
+// ── Helpers ──
+function canKeep(pid, drawnCard, gs) {
+    if (drawnCard===0) return true;
+    const pile = roomData.players[pid]?.pile;
+    if (!pile?.length) return true;
+    return drawnCard > getEffectiveTop(pid, gs, roomData.players);
+}
+function canTakeFromDiscard(pid, card, gs, players) {
+    if (card===0) return true;
+    const pile = players[pid]?.pile;
+    if (!pile?.length) return true;
+    return card > getEffectiveTop(pid, gs, players);
+}
+
+document.getElementById('btn-tutorial').onclick = ()=> document.getElementById('tutorial-modal').style.display='block';
+document.getElementById('btn-close-tutorial').onclick = ()=> document.getElementById('tutorial-modal').style.display='none';
+document.getElementById('btn-skip-steal').onclick = skipSteal;
+document.getElementById('btn-skip-sabotage').onclick = skipSabotage;
+document.getElementById('btn-cancel-flip').onclick = ()=> document.getElementById('flip-modal').classList.remove('visible');
 </script>
 </body>
 </html>
