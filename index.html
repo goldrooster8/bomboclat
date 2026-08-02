@@ -258,11 +258,14 @@ const UPGRADES = [
     { id: 'mystery_box', name: 'Mystery Box', cost: 2, desc: 'Does absolutely nothing. Mystery!' },
     { id: 'thief_reflex', name: "Thief's Reflex", cost: 5, desc: 'Once per round: if top ≥ 80, steal an opponent\'s top card after your turn.' },
     { id: 'sabotage', name: 'Sabotage', cost: 4, desc: 'Once per round: +15 effective top on an opponent until their turn ends.' },
-    { id: 'burn_hearts', name: 'Burn Hearts', cost: 5, desc: 'One-time use. Destroy ALL ♥ cards from every player\'s pile (including yours).' },
-    { id: 'burn_diamonds', name: 'Burn Diamonds', cost: 5, desc: 'One-time use. Destroy ALL ♦ cards from every player\'s pile (including yours).' },
-    { id: 'burn_clubs', name: 'Burn Clubs', cost: 5, desc: 'One-time use. Destroy ALL ♣ cards from every player\'s pile (including yours).' },
-    { id: 'burn_spades', name: 'Burn Spades', cost: 5, desc: 'One-time use. Destroy ALL ♠ cards from every player\'s pile (including yours).' },
-    { id: 'heartless', name: 'Heartless', cost: 3, desc: 'Passive. If your final pile contains no ♥ cards at round end, earn +2 coins.' },
+    { id: 'burn_hearts', name: 'Burn Hearts', cost: 5, desc: 'One-time use. Destroy ALL ♥ cards from every player\'s pile (including yours).', weight: 0.25 },
+    { id: 'burn_diamonds', name: 'Burn Diamonds', cost: 5, desc: 'One-time use. Destroy ALL ♦ cards from every player\'s pile (including yours).', weight: 0.25 },
+    { id: 'burn_clubs', name: 'Burn Clubs', cost: 5, desc: 'One-time use. Destroy ALL ♣ cards from every player\'s pile (including yours).', weight: 0.25 },
+    { id: 'burn_spades', name: 'Burn Spades', cost: 5, desc: 'One-time use. Destroy ALL ♠ cards from every player\'s pile (including yours).', weight: 0.25 },
+    { id: 'heartless_hearts', name: 'Heartless', cost: 3, desc: 'Passive. If your final pile contains no ♥ cards at round end, earn +2 coins.', weight: 0.25 },
+    { id: 'heartless_diamonds', name: 'Heartless', cost: 3, desc: 'Passive. If your final pile contains no ♦ cards at round end, earn +2 coins.', weight: 0.25 },
+    { id: 'heartless_clubs', name: 'Heartless', cost: 3, desc: 'Passive. If your final pile contains no ♣ cards at round end, earn +2 coins.', weight: 0.25 },
+    { id: 'heartless_spades', name: 'Heartless', cost: 3, desc: 'Passive. If your final pile contains no ♠ cards at round end, earn +2 coins.', weight: 0.25 },
     { id: 'best_draw', name: 'Eagle Eye', cost: 5, desc: 'Once per round: peek at top 8 deck cards, draw the best legal one (must keep). If none legal, ability wasted.' },
 ];
 
@@ -447,7 +450,6 @@ function renderGame() {
         slot.className = 'player-slot' + (pid === getCurrentPlayerId(gs) ? ' active-turn' : '');
         slot.style.left = (Math.cos(rad) * radius) + 'px'; slot.style.top = (Math.sin(rad) * radius) + 'px';
         slot.style.transform = `translate(-50%, -50%) rotate(${-rotDeg}deg)`;
-        // Cards with suit symbols
         const cardsHtml = pile.length ? pile.map(c => {
             const sym = getSuitSymbol(c);
             return `<div class="mini-card" style="background:${cardColor(c)}; color:#fff; ${(gs.glassCards||[]).includes(c)?'border: 2px solid cyan;':''}">
@@ -584,14 +586,13 @@ function processRoundEndLogic(room) {
     if (winners.length > 1) { let minTop = Infinity, tie = []; winners.forEach(pid => { if (tops[pid] < minTop) { minTop = tops[pid]; tie = [pid]; } else if (tops[pid] === minTop) tie.push(pid); }); winners = tie; }
     let minT = Infinity, lowBonus = []; Object.entries(tops).forEach(([pid, top]) => { if (top < minT) { minT = top; lowBonus = [pid]; } else if (top === minT) lowBonus.push(pid); });
     Object.keys(players).forEach(pid => { const p = players[pid]; p.roundScores = [...(p.roundScores || []), (p.pile || []).length]; p.coins = (p.coins || 0) + 3 + (lowBonus.includes(pid) ? 1 : 0); p.roundState = defaultRoundState(); });
-    // Heartless passive
+    // Heartless passive for all four suits
     Object.keys(players).forEach(pid => {
         const p = players[pid];
-        if (hasUpgrade(p, 'heartless')) {
-            if (!p.pile.some(c => getSuit(c) === 'Hearts')) {
-                p.coins += 2;
-            }
-        }
+        if (hasUpgrade(p, 'heartless_hearts') && !p.pile.some(c => getSuit(c) === 'Hearts')) p.coins += 2;
+        if (hasUpgrade(p, 'heartless_diamonds') && !p.pile.some(c => getSuit(c) === 'Diamonds')) p.coins += 2;
+        if (hasUpgrade(p, 'heartless_clubs') && !p.pile.some(c => getSuit(c) === 'Clubs')) p.coins += 2;
+        if (hasUpgrade(p, 'heartless_spades') && !p.pile.some(c => getSuit(c) === 'Spades')) p.coins += 2;
     });
     gs.roundResults = { round: gs.round, piles, winners, lowTopBonus: lowBonus }; gs.totalScores = gs.totalScores || {};
     Object.keys(players).forEach(pid => gs.totalScores[pid] = (gs.totalScores[pid] || 0) + (players[pid].pile || []).length);
@@ -760,9 +761,37 @@ function renderRoundOverlay() {
     }
 }
 
+// Weighted random selection helper
+function weightedSample(pool, weightFn) {
+    const totalWeight = pool.reduce((sum, item) => sum + weightFn(item), 0);
+    let rand = Math.random() * totalWeight;
+    for (const item of pool) {
+        rand -= weightFn(item);
+        if (rand <= 0) return item;
+    }
+    return pool[pool.length - 1];
+}
+
 async function openShopHost() {
-    shopAdvanceTriggered = false; roundEndProcessed = false; const offerings = {};
-    Object.entries(roomData.players || {}).forEach(([pid, p]) => { offerings[pid] = shuffle(UPGRADES.filter(u => !(p.upgrades || []).includes(u.id))).slice(0, 3).map(u => u.id); });
+    shopAdvanceTriggered = false; roundEndProcessed = false;
+    const offerings = {};
+    Object.entries(roomData.players || {}).forEach(([pid, p]) => {
+        const unowned = UPGRADES.filter(u => !(p.upgrades || []).includes(u.id));
+        if (unowned.length <= 3) {
+            offerings[pid] = unowned.map(u => u.id);
+        } else {
+            const selected = [];
+            const pool = [...unowned];
+            while (selected.length < 3 && pool.length > 0) {
+                const chosen = weightedSample(pool, u => u.weight || 1);
+                selected.push(chosen.id);
+                // remove all copies of the same upgrade (though ids are unique)
+                const idx = pool.findIndex(u => u.id === chosen.id);
+                if (idx !== -1) pool.splice(idx, 1);
+            }
+            offerings[pid] = selected;
+        }
+    });
     await roomRef.child('gameState').update({ phase: 'shop', shopOpen: true, shopDeadline: now() + SHOP_SECONDS * 1000, shopReady: {}, shopOfferings: offerings });
 }
 
